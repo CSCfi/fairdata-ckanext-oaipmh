@@ -1,6 +1,7 @@
-OAI-PMH harvester for CKAN. 
-This extends CKAN harvester to parse OAI-PMH metadata sources and import datasets. 
-Supported metadata schemas are oai_dc (Dublin Core), CMDI (Component MetaData Infrastructure).
+OAI-PMH harvester for Metax.
+============================
+
+This extends CKAN harvester to parse OAI-PMH metadata sources and import datasets.
 
 The list of supported verbs consists of:
 
@@ -8,7 +9,7 @@ The list of supported verbs consists of:
 * Identify: when creating the client object ('harvest source'), displays information about this OAI-PMH server.
 * ListIdentifiers: fetches individual datasets' identifiers.
 * ListSets: fetches identifiers of sets.
-    
+
 Harvester configuration
 =======================
 
@@ -21,12 +22,3 @@ Configuration options:
 - set: Harvest only from certain sets.
 - type: Harvest only certain type.
 - until: Harvest datasets before date YYYY-MM-DD.
-
-Here is an example of a configuration object (the one that must be entered in
-the configuration field):
-
-    {
-     "limit": 10,
-     "set": ["hdl_10138_135703"],
-     "from": "2014-03-03"
-    }
