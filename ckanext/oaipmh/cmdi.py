@@ -9,7 +9,7 @@ from ckanext.oaipmh import importformats
 from ckanext.oaipmh.cmdi_reader import CmdiReader
 from ckanext.oaipmh.harvester import OAIPMHHarvester
 
-from ckanext.etsin.data_catalog_service import DatasetCatalogMetaxAPIService
+from ckanext.etsin.data_catalog_service import DataCatalogMetaxAPIService
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class CMDIHarvester(OAIPMHHarvester):
     # What is the correct path? This file could be located also in this project
     # if the path is easier to find from this project. Currently the file is in
     # ckanext-etsin
-    DATASET_CATALOG_JSON_FILE_PATH = "resources/language_bank_data_catalog.json"
+    DATA_CATALOG_JSON_FILE_PATH = "resources/language_bank_data_catalog.json"
 
     def info(self):
         ''' See ;meth:`ckanext.harvest.harvesters.base.HarvesterBase.info`. '''
@@ -51,7 +51,7 @@ class CMDIHarvester(OAIPMHHarvester):
     def gather_stage(self, harvest_job):
         """ See :meth:`OAIPMHHarvester.gather_stage`  """
 
-        self._set_dataset_catalog_id()
+        self.set_data_catalog_id()
         config = self._get_configuration(harvest_job)
         if not config.get('type'):
             config['type'] = 'cmdi'
@@ -63,13 +63,13 @@ class CMDIHarvester(OAIPMHHarvester):
 
     def parse_xml(self, f, context, orig_url=None, strict=True):
         data_dict = CmdiReader().read_data(etree.fromstring(f))
-        data_dict['dataset_catalog'] = self.catalog_id
+        data_dict['data_catalog'] = self.catalog_id
         return data_dict
 
-    def _set_dataset_catalog_id(self):
+    def set_data_catalog_id(self):
         self.catalog_id = ''
-        catalog_service = DatasetCatalogMetaxAPIService()
+        catalog_service = DataCatalogMetaxAPIService()
         try:
-            self.catalog_id = catalog_service.create_or_update_dataset_catalogs(True, CMDIHarvester.DATASET_CATALOG_JSON_FILE_PATH)
+            self.catalog_id = catalog_service.create_or_update_data_catalogs(True, CMDIHarvester.DATA_CATALOG_JSON_FILE_PATH)
         except Exception:
             raise
