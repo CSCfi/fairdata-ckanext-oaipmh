@@ -51,7 +51,10 @@ class CMDIHarvester(OAIPMHHarvester):
     def gather_stage(self, harvest_job):
         """ See :meth:`OAIPMHHarvester.gather_stage`  """
 
-        self.set_data_catalog_id()
+        # Get data catalog id to be used in harvest_object
+        # so that import_stage can access it
+        catalog_id = self._get_data_catalog_id()
+        
         config = self._get_configuration(harvest_job)
         if not config.get('type'):
             config['type'] = 'cmdi'
@@ -59,17 +62,13 @@ class CMDIHarvester(OAIPMHHarvester):
             harvest_job.source.save()
         registry = self.metadata_registry(config, harvest_job)
         client = self.client or oaipmh.client.Client(harvest_job.source.url, registry)
-        return self.populate_harvest_job(harvest_job, None, config, client)
+        return self.populate_harvest_job(harvest_job, None, config, client, catalog_id)
 
     def parse_xml(self, f, context, orig_url=None, strict=True):
         data_dict = CmdiReader().read_data(etree.fromstring(f))
         data_dict['data_catalog'] = self.catalog_id
         return data_dict
 
-    def set_data_catalog_id(self):
-        self.catalog_id = ''
+    def _get_data_catalog_id(self):
         catalog_service = DataCatalogMetaxAPIService()
-        try:
-            self.catalog_id = catalog_service.create_or_update_data_catalogs(True, CMDIHarvester.DATA_CATALOG_JSON_FILE_PATH)
-        except Exception:
-            raise
+        return catalog_service.create_or_update_data_catalogs(True, CMDIHarvester.DATA_CATALOG_JSON_FILE_PATH)

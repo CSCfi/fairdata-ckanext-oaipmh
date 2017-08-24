@@ -23,6 +23,7 @@ from ckan.logic import NotFound, NotAuthorized, ValidationError
 from ckan import model
 
 from ckanext.harvest.model import HarvestJob, HarvestObject
+from ckanext.harvest.model import HarvestObjectExtra as HOExtra
 from ckanext.harvest.harvesters.base import HarvesterBase
 import ckanext.kata.utils
 import ckanext.kata.plugin
@@ -249,7 +250,7 @@ class OAIPMHHarvester(HarvesterBase):
         log.debug('Sets in config: %s', set_ids)
         return self.populate_harvest_job(harvest_job, set_ids, config, client)
 
-    def populate_harvest_job(self, harvest_job, set_ids, config, client):
+    def populate_harvest_job(self, harvest_job, set_ids, config, client, catalog_id=None):
         # Check if this source has been harvested before
         previous_job = Session.query(HarvestJob) \
             .filter(HarvestJob.source == harvest_job.source) \
@@ -291,7 +292,9 @@ class OAIPMHHarvester(HarvesterBase):
             if len(package_ids):
                 for package_id in islice(package_ids, config['limit']) if 'limit' in config else package_ids:
                     # Create a new HarvestObject for this identifier
-                    obj = HarvestObject(guid=package_id, job=harvest_job)
+                    obj = HarvestObject(guid=package_id, job=harvest_job, extras=[])
+                    if catalog_id:
+                        obj.extras.append(HOExtra(key='catalog_id', value=catalog_id))
                     obj.save()
                     object_ids.append(obj.id)
                 log.debug('Object ids: {i}'.format(i=object_ids))
@@ -397,6 +400,13 @@ class OAIPMHHarvester(HarvesterBase):
 
         package_dict = content.pop('unified')
         package_dict['xpaths'] = content
+
+        # Set data catalog id to package_dict, if it exists in
+        # HarvestObjectExtra objects
+        for ho in harvest_object.extras:
+            if ho.key == 'catalog_id':
+                package_dict['data_catalog'] = ho.value
+                break
 
         # If package exists use old PID, otherwise create new
         pkg_id = ckanext.kata.utils.get_package_id_by_primary_pid(package_dict)
