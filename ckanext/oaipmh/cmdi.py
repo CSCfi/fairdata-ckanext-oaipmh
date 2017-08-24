@@ -18,9 +18,6 @@ class CMDIHarvester(OAIPMHHarvester):
     md_format = 'cmdi0571'
     client = None  # used for testing
 
-    # What is the correct path? This file could be located also in this project
-    # if the path is easier to find from this project. Currently the file is in
-    # ckanext-etsin
     DATA_CATALOG_JSON_FILE_PATH = "resources/language_bank_data_catalog.json"
 
     def info(self):
