@@ -28,16 +28,6 @@ def convert_language(lang):
             return ''
 
 
-def get_earliest_datestamp():
-    '''
-    Return earliest datestamp of packages as defined in:
-    http://www.openarchives.org/OAI/openarchivesprotocol.html#Identify
-    '''
-
-    return model.Session.query(model.Package.metadata_modified). \
-        order_by(model.Package.metadata_modified).first()[0]
-
-
 # Should this be in some mapper or refiner?
 def pid_to_name(string):
     '''
