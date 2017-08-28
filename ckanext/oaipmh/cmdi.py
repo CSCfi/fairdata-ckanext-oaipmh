@@ -1,15 +1,12 @@
-import httplib
 import json
 import logging
-import urllib2
 from lxml import etree
 import oaipmh
-from ckanext.kata.utils import get_package_id_by_pid
-from ckanext.oaipmh import importformats
 from ckanext.oaipmh.cmdi_reader import CmdiReader
 from ckanext.oaipmh.harvester import OAIPMHHarvester
 
 from ckanext.etsin.data_catalog_service import DataCatalogMetaxAPIService
+import ckanext.oaipmh.utils as utils
 
 log = logging.getLogger(__name__)
 
@@ -29,15 +26,11 @@ class CMDIHarvester(OAIPMHHarvester):
             'description': 'Harvests CMDI dataset'
         }
 
-    def get_schema(self, config, pkg):
-        from ckanext.kata.plugin import KataPlugin
-        return KataPlugin.create_package_schema_oai_cmdi()
-
     def on_deleted(self, harvest_object, header):
         """ See :meth:`OAIPMHHarvester.on_deleted`
             Mark package for deletion.
         """
-        package_id = get_package_id_by_pid(header.identifier(), 'primary')
+        package_id = utils.get_package_id_by_pid(header.identifier(), 'primary')
         if package_id:
             harvest_object.package_id = package_id
         harvest_object.content = None

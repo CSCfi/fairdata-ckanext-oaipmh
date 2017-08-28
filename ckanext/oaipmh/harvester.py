@@ -1,37 +1,26 @@
 # coding: utf-8
 # vi:et:ts=8:
-import httplib
-
 import logging
 import json
 from itertools import islice
-from lxml import etree
-import urllib2
-from pylons import config as c
-from paste.deploy.converters import asbool
 
 import oaipmh.client
 import oaipmh.error
 from dateutil.parser import parse as dp
 from ckan.controllers.api import get_action
-from ckanext.oaipmh.oai_dc_reader import dc_metadata_reader
 
 import importformats
 
 from ckan.model import Session, Package
-from ckan.logic import NotFound, NotAuthorized, ValidationError
 from ckan import model
 
 from ckanext.harvest.model import HarvestJob, HarvestObject
 from ckanext.harvest.model import HarvestObjectExtra as HOExtra
 from ckanext.harvest.harvesters.base import HarvesterBase
-import ckanext.kata.utils
-import ckanext.kata.plugin
+import ckanext.etsin.actions as actions
 import fnmatch
 import re
-import ckanext.kata.kata_ldap as ld
-from ckanext.kata.utils import pid_to_name
-from ckanext.kata.utils import generate_pid
+import ckanext.oaipmh.utils as utils
 
 log = logging.getLogger(__name__)
 
@@ -258,7 +247,6 @@ class OAIPMHHarvester(HarvesterBase):
             .filter(HarvestJob.id != harvest_job.id) \
             .order_by(HarvestJob.gather_finished.desc()) \
             .limit(1).first()
-
         last_time = None
         if previous_job and previous_job.finished and model.Package.get(harvest_job.source.id).metadata_modified < previous_job.gather_started:
             last_time = previous_job.gather_started.isoformat()
@@ -270,9 +258,9 @@ class OAIPMHHarvester(HarvesterBase):
         if not self._recreate(harvest_job) and package_ids:
             converted_identifiers = {}
             for identifier in package_ids:
-                converted_identifiers[pid_to_name(identifier)] = identifier
+                converted_identifiers[utils.pid_to_name(identifier)] = identifier
                 if identifier.endswith(u'm'):
-                    converted_identifiers[pid_to_name(u"%ss" % identifier[0:-1])] = identifier
+                    converted_identifiers[utils.pid_to_name(u"%ss" % identifier[0:-1])] = identifier
 
             for package in model.Session.query(model.Package).filter(model.Package.name.in_(converted_identifiers.keys())).all():
                 converted_name = package.name
@@ -356,14 +344,6 @@ class OAIPMHHarvester(HarvesterBase):
 
         return True
 
-    def get_schema(self, config, pkg):
-        if config.get('type', 'default') != 'ida':
-            return ckanext.kata.plugin.KataPlugin.update_package_schema_oai_dc() if pkg \
-                else ckanext.kata.plugin.KataPlugin.create_package_schema_oai_dc()
-        else:
-            return ckanext.kata.plugin.KataPlugin.update_package_schema_oai_dc_ida() if pkg \
-                else ckanext.kata.plugin.KataPlugin.create_package_schema_oai_dc_ida()
-
     def import_stage(self, harvest_object):
         '''
         The import stage will receive a HarvestObject object and will be
@@ -409,7 +389,7 @@ class OAIPMHHarvester(HarvesterBase):
                 break
 
         # If package exists use old PID, otherwise create new
-        pkg_id = ckanext.kata.utils.get_package_id_by_primary_pid(package_dict)
+        pkg_id = utils.get_package_id_by_primary_pid(package_dict)
         pkg = Session.query(Package).filter(Package.id == pkg_id).first() if pkg_id else None
         log.debug('Package: "{pkg}"'.format(pkg=pkg))
 
@@ -417,7 +397,7 @@ class OAIPMHHarvester(HarvesterBase):
             log.debug("Not re-creating package: %s", pkg_id)
             return True
         if not package_dict.get('id', None):
-            package_dict['id'] = pkg.id if pkg else generate_pid()
+            package_dict['id'] = pkg.id if pkg else utils.generate_pid()
 
         uploader = ''
 
@@ -434,37 +414,10 @@ class OAIPMHHarvester(HarvesterBase):
                 package_dict.pop('uploader')
             if config.get('type') == 'ida':
                 package_dict['persist_schema'] = u'True'
-            schema = self.get_schema(config, pkg)
-            # schema['xpaths'] = [ignore_missing, ckanext.kata.converters.xpath_to_extras]
-            result = self._create_or_update_package(package_dict,
-                                                    harvest_object,
-                                                    schema=schema,
-                                                    # s_schema=ckanext.kata.plugin.KataPlugin.show_package_schema()
-                                                    )
-            if uploader and asbool(c.get('kata.ldap.enabled', False)):
-                try:
-                    usr = ld.get_user_from_ldap(uploader)
-                    if usr:
-                        # by_openid leaves session hanging if usr is not set
-                        usrname = model.User.by_openid(usr)
-                    if usrname:
-                        editor_dict = {"name": package_dict['name'],
-                                       "role": "admin",
-                                       "username": usrname.name
-                                       }
-                        context = {'model': model, 'session': model.Session,
-                                   'user': 'harvest'}
-                        try:
-                            # if we fail the adding, no problem
-                            ckanext.kata.actions.dataset_editor_add(context, editor_dict)
-                        except ValidationError:
-                            pass
-                        except NotFound:
-                            pass
-                        except NotAuthorized:
-                            pass
-                except:
-                    pass
+            context = {'user': 'harvest'}
+            from pprint import pprint
+            log.debug(pprint(package_dict))
+            result = actions.package_create(context, package_dict)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -473,33 +426,3 @@ class OAIPMHHarvester(HarvesterBase):
             return False
 
         return result
-
-    def parse_xml(self, f, context, orig_url=None, strict=True):
-        """ Parse XML and return package data dictionary.
-
-        :param f: data as string
-        :param context: CKAN context
-        :param orig_url: orgininal URL
-        :param strict: No used here, required by caller
-        :return: package dictionary (used for package creation)
-        """
-        metadata = dc_metadata_reader('default')(etree.fromstring(f))
-        return metadata['unified']
-
-    def fetch_xml(self, url, context):
-        '''Get xml for import. Shortened from :meth:`fetch_stage`
-
-        :param url: the url for metadata file
-        :param type: string
-
-        :return: a xml file
-        :rtype: string
-        '''
-        try:
-            log.debug('Requesting url {ur}'.format(ur=url))
-            f = urllib2.urlopen(url).read()
-            return self.parse_xml(f, context, url)
-        except (urllib2.URLError, urllib2.HTTPError,):
-            log.debug('fetch_xml: Could not fetch from url {ur}!'.format(ur=url))
-        except httplib.BadStatusLine:
-            log.debug('Bad HTTP response status line.')

@@ -12,9 +12,8 @@ import json
 
 from oaipmh import common as oc
 from ckanext.oaipmh import importcore
-import ckanext.kata.utils
 import utils
-from ckanext.kata.utils import label_list_yso, generate_pid, pid_to_name
+from ckanext.kata.utils import generate_pid, pid_to_name
 from urlparse import urlparse
 
 xml_reader = importcore.generic_xml_metadata_reader
@@ -82,16 +81,6 @@ class DcMetadataReader():
         """ Get version pid. By default does not return any data. """
         return []
 
-    def _resolve_tags(self, tag):
-        try:
-            if urlparse(tag).scheme in ('http', 'https'):
-                resolved = label_list_yso(tag)
-                if resolved:
-                    return resolved
-        except:
-            pass
-        return [tag]
-
     def _get_mime_type(self):
         return first([a.string for a in self.dc('format', text=re.compile('/'), recursive=False)]) or ''
 
@@ -108,9 +97,6 @@ class DcMetadataReader():
 
         data_pids = list(_get_data_pids(self.dc))
 
-        tags = []
-        #for tag in sorted([a.string for a in self.dc('subject', recursive=False)]):
-        #    tags.extend(self._resolve_tags(tag))
         tags = [a.string for a in self.dc('subject', recursive=False)]
 
         transl_json = {}
