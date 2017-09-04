@@ -75,8 +75,6 @@ class OAIPMHHarvester(HarvesterBase):
         """ See :meth:`OAIPMHHarvester.on_deleted`
             Mark package for deletion.
         """
-        if header.identifier():
-            harvest_object.package_id = header.identifier()
         harvest_object.content = None
         harvest_object.report_status = "deleted"
         harvest_object.save()
@@ -343,15 +341,13 @@ class OAIPMHHarvester(HarvesterBase):
         # Get mapped package_dict
         content = json.loads(harvest_object.content)
         package_dict = content.pop('package_dict')
+        context.update({'return_id_only': True})
 
         # Set data catalog id to package_dict, if it exists in
         # harvest source configuration
         config = self._get_configuration(harvest_object)
         if config.get('data_catalog_id', False):
             package_dict['data_catalog'] = config.get('data_catalog_id')
-
-        context.update({
-            'return_id_only': True})
 
         if status == 'new':
             package_dict['id'] = unicode(uuid.uuid4())

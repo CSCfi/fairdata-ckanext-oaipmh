@@ -31,5 +31,5 @@ class CmdiReader(object):
         :return: oaipmh.common.Metadata object generated from xml
         """
         result = generic_xml_metadata_reader(xml).getMap()
-        result['package_dict'] = cmdi_mapper(dict(xml=xml), dict(package_dict={}))
+        result['package_dict'] = cmdi_mapper(xml)
         return oaipmh.common.Metadata(xml, result)
