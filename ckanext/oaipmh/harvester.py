@@ -344,12 +344,17 @@ class OAIPMHHarvester(HarvesterBase):
         content = json.loads(harvest_object.content)
         package_dict = content.pop('package_dict')
 
+        # Set data catalog id to package_dict, if it exists in
+        # harvest source configuration
+        config = self._get_configuration(harvest_object)
+        if config.get('data_catalog_id', False):
+            package_dict['data_catalog'] = config.get('data_catalog_id')
+
         context.update({
             'return_id_only': True})
 
         if status == 'new':
             package_dict['id'] = unicode(uuid.uuid4())
-
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
 
