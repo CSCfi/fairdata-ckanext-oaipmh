@@ -71,15 +71,6 @@ class OAIPMHHarvester(HarvesterBase):
             config = '{}'
         return config
 
-    def on_deleted(self, harvest_object, header):
-        """ See :meth:`OAIPMHHarvester.on_deleted`
-            Mark package for deletion.
-        """
-        harvest_object.content = None
-        harvest_object.report_status = "deleted"
-        harvest_object.save()
-        return True
-
     def get_record_identifiers(self, set_ids, config, client):
         ''' Get package identifiers from given set identifiers.
         '''
@@ -243,42 +234,6 @@ class OAIPMHHarvester(HarvesterBase):
         :param harvest_object: HarvestObject object
         :returns: True if everything went right, False if errors were found
         '''
-        log.debug("Fetch stage for harvest object with guid: %s", harvest_object.guid)
-        # Get metadata content from provider
-        try:
-            # Create a OAI-PMH Client and get record
-            config = self._get_configuration(harvest_object)
-            registry = self.metadata_registry(config, harvest_object)
-            client = oaipmh.client.Client(harvest_object.job.source.url, registry)
-            header, metadata, _about = client.getRecord(identifier=harvest_object.guid, metadataPrefix=self.md_format)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self._save_object_error('Unable to get metadata from provider: {u}: {e}'.format(
-                u=harvest_object.source.url, e=e), harvest_object)
-            return False
-
-        if header and header.isDeleted():
-            return self.on_deleted(harvest_object, header)
-
-        if header and header.datestamp():
-            harvest_object.metadata_modified_date = header.datestamp()
-            harvest_object.save()
-
-        # Get contents
-        try:
-            content = json.dumps(metadata.getMap())
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self._save_object_error('Unable to get content for package: {u}: {e}'.format(
-                u=harvest_object.source.url, e=e), harvest_object)
-            return False
-
-        # Save the fetched contents in the HarvestObject
-        harvest_object.content = content
-        harvest_object.save()
-
         return True
 
     def import_stage(self, harvest_object):
@@ -303,6 +258,8 @@ class OAIPMHHarvester(HarvesterBase):
             log.error('No harvest object received')
             return False
 
+        config = self._get_configuration(harvest_object)
+
         context = {
             'model': model,
             'session': model.Session,
@@ -310,6 +267,37 @@ class OAIPMHHarvester(HarvesterBase):
         }
 
         status = self._get_object_extra(harvest_object, 'status')
+
+        # Get metadata content from provider
+        try:
+            # Create a OAI-PMH Client and get record
+            registry = self.metadata_registry(config, harvest_object)
+            client = oaipmh.client.Client(harvest_object.job.source.url, registry)
+            header, metadata, _about = client.getRecord(identifier=harvest_object.guid,
+                                                        metadataPrefix=self.md_format)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._save_object_error('Unable to get metadata from provider: {u}: {e}'.format(
+                u=harvest_object.source.url, e=e), harvest_object)
+            return False
+
+        if header and header.datestamp():
+            harvest_object.metadata_modified_date = header.datestamp()
+            harvest_object.save()
+
+        # Get contents
+        try:
+            content = json.dumps(metadata.getMap())
+            # Save the fetched contents in the HarvestObject
+            harvest_object.content = content
+            harvest_object.save()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._save_object_error('Unable to get content for package: {u}: {e}'.format(
+                u=harvest_object.source.url, e=e), harvest_object)
+            return False
 
         if status == 'delete':
             # Delete package
@@ -341,11 +329,11 @@ class OAIPMHHarvester(HarvesterBase):
         # Get mapped package_dict
         content = json.loads(harvest_object.content)
         package_dict = content.pop('package_dict')
+        context.update({'xml': metadata.element()})
         context.update({'return_id_only': True})
 
         # Set data catalog id to package_dict, if it exists in
         # harvest source configuration
-        config = self._get_configuration(harvest_object)
         if config.get('data_catalog_id', False):
             package_dict['data_catalog'] = config.get('data_catalog_id')
 
