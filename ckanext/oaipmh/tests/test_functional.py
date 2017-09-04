@@ -65,19 +65,6 @@ class TestReadingFixtures(TestCase):
     def teardown_class(cls):
         ckan.model.repo.rebuild_db()
 
-    def test_list(self):
-        '''
-        Parse ListIdentifiers result
-        '''
-
-        registry = importformats.create_metadata_registry()
-        client = oaipmh.client.Client(_get_fixture(FIXTURE_LISTIDENTIFIERS), registry)
-        identifiers = (header.identifier() for header in client.listIdentifiers(metadataPrefix='oai_dc'))
-
-        assert 'oai:arXiv.org:hep-th/9801001' in identifiers
-        assert 'oai:arXiv.org:hep-th/9801002' in identifiers
-        assert 'oai:arXiv.org:hep-th/9801005' in identifiers
-        assert 'oai:arXiv.org:hep-th/9801010' in identifiers
 
     def test_fetch(self):
         '''

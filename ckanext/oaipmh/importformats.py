@@ -8,8 +8,6 @@ import oaipmh.metadata as om
 import lxml.etree
 from fn.uniform import range
 from ckanext.oaipmh.cmdi_reader import CmdiReader
-# from ckanext.oaipmh.datacite_reader import DataCiteReader
-# from ckanext.oaipmh.oai_dc_reader import dc_metadata_reader
 
 import importcore
 

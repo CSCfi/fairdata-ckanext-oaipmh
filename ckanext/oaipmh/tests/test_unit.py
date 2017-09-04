@@ -4,36 +4,21 @@
 """
 Unit tests for OAI-PMH harvester.
 """
-import copy
-from unittest import TestCase
 
-import testfixtures
-import bs4
+from unittest import TestCase
 from lxml import etree
 from pylons import config
-
 import ckan
-from ckanext.harvest.commands import harvester
 from ckanext.harvest.model import HarvestJob, HarvestSource, HarvestObject
 from ckanext.oaipmh.cmdi import CMDIHarvester
 from ckanext.oaipmh.cmdi_reader import CmdiReader
-from ckanext.oaipmh.harvester import OAIPMHHarvester
 import ckanext.harvest.model as harvest_model
 import ckanext.kata.model as kata_model
-from ckanext.oaipmh.ida import IdaHarvester
-from ckanext.oaipmh.importformats import create_metadata_registry
-import ckanext.oaipmh.oai_dc_reader as dcr
-from ckanext.oaipmh.oai_dc_reader import dc_metadata_reader
 import os
 from ckan import model
 from ckan.logic import get_action
 import json
 import ckanext.kata.utils as utils
-
-
-FIXTURE_HELDA = "helda_oai_dc.xml"
-FIXTURE_IDA = "oai-pmh.xml"
-
 
 def _get_fixture(filename):
     return os.path.join(os.path.dirname(__file__), "..", "test_fixtures", filename)
@@ -42,40 +27,6 @@ def _get_fixture(filename):
 def _get_record(filename):
     tree = etree.parse(_get_fixture(filename))
     return tree.xpath('/oai:OAI-PMH/*/oai:record', namespaces={'oai': 'http://www.openarchives.org/OAI/2.0/'})[0]
-
-
-def _get_single_package():
-    packages = model.Session.query(model.Package).filter_by(state=model.State.ACTIVE)
-    assert len(list(packages)) == 1
-    return packages[0]
-
-
-class _FakeHarvestSource():
-    def __init__(self, config, url):
-        self.config = json.dumps(config)
-        self.url = url
-
-
-class _FakeHarvestJob():
-    def __init__(self, source):
-        self.source = source
-
-
-class _FakeHarvestObject():
-    def __init__(self, content, identification, config, source_url=None):
-        self.content = content
-        self.id = identification
-        self.guid = self.id
-        self.source = _FakeHarvestSource(config, source_url)
-        self.harvest_source_id = None
-        self.job = _FakeHarvestJob(self.source)
-        self.report_status = None
-
-    def add(self):
-        pass
-
-    def save(self):
-        pass
 
 
 class _FakeIdentifier():
@@ -89,150 +40,6 @@ class _FakeIdentifier():
 class _FakeClient():
     def listIdentifiers(self, metadataPrefix):
         return [_FakeIdentifier('oai:kielipankki.fi:sha3a880')]
-
-class TestOAIPMHHarvester(TestCase):
-
-    @classmethod
-    def setup_class(cls):
-        '''
-        Setup database and variables
-        '''
-        ckan.model.repo.rebuild_db()
-        harvest_model.setup()
-        kata_model.setup()
-        cls.harvester = OAIPMHHarvester()
-
-    def tearDown(self):
-        ckan.model.repo.rebuild_db()
-
-    def test_harvester_info(self):
-        info = self.harvester.info()
-        assert isinstance(info, dict)
-
-    def test_gather_stage(self):
-        # gather_stage should throw some exception with parameter None
-        self.assertRaises(Exception, self.harvester.gather_stage, (None))
-
-    def test_fetch_stage(self):
-        url = "file://%s" % _get_fixture('ida.xml')
-        harvest_object = _FakeHarvestObject(None, "test_fetch_id", {'type': 'ida'}, url)
-        self.harvester.fetch_stage(harvest_object)
-
-    def test_fetch_stage_invalid(self):
-        url = "file://%s" % _get_fixture('ida_invalid.xml')
-        harvest_object = _FakeHarvestObject(None, "test_fetch_id", {'type': 'ida'}, url)
-        self.assertRaises(Exception, self.harvester.fetch_stage, harvest_object)
-
-    def test_import_stage(self):
-        assert not self.harvester.import_stage(None)
-
-    def _run_import(self, xml, ida, config=None):
-        if not model.User.get('harvest'):
-            model.User(name='harvest', sysadmin=True).save()
-        if not model.Group.get('test'):
-            get_action('organization_create')({'user': 'harvest'}, {'name': 'test'})
-
-        record = _get_record(xml)
-        harvest_type = 'ida' if ida else 'default'
-        if config is None:
-            config = {'type': harvest_type}
-
-        metadata = dc_metadata_reader(harvest_type)(record)
-        metadata['unified']['owner_org'] = "test"
-        harvest_object = _FakeHarvestObject(json.dumps(metadata.getMap()), "test_id", config)
-
-        self.harvester.import_stage(harvest_object)
-
-    def test_import_stage_data(self):
-        for xml_path, ida in ('ida.xml', True), ('helda.xml', False):
-            self._run_import(xml_path, ida)
-            package = _get_single_package()
-            package_dict = get_action('package_show')({'model': model, 'session': model.Session, 'user': 'harvest'}, {'id': package.id})
-            if ida:
-                self.assertTrue('direct_download' not in package.notes)
-                self.assertEquals(package.extras.get('availability', None), 'direct_download')
-                pid_ids = [pid.get('id') for pid in package_dict.get('pids', [])]
-                self.assertTrue(u'test-version' in pid_ids)
-                self.assertTrue(u'urn:nbn:fi:csc-ida2014010800372s' in pid_ids)
-                self.assertEquals('application/test', package_dict['mimetype'])
-
-                self.assertEquals(package.extras.get('availability', None), 'direct_download')
-                expected = (u'contact_0_email', u'test1@example.fi'), (u'contact_0_name', u'Test Person1'), (u'contact_0_phone', u'0501231234'), \
-                           (u'contact_1_email', u'test2@example.fi'), (u'contact_1_name', u'Test Person2'), (u'contact_1_phone', u'0501231234'),
-
-                for key, value in expected:
-                    self.assertEquals(package.extras.get(key), value)
-
-            package.delete()
-            model.repo.commit()
-
-    def test_import_stage_tags(self):
-        self._run_import('oai-pmh.xml', True)
-        package = _get_single_package()
-        tags = [tag.name for tag in package.get_tags()]
-        self.assertTrue('http://www.yso.fi/onto/yso/p2069' in tags)
-
-    def test_import_stage_project(self):
-        self._run_import('ida3.xml', True)
-        package = _get_single_package()
-
-        expected = [('agent_1_organisation', 'Paras yliopisto')]
-
-        for key, value in expected:
-            self.assertEquals(package.extras.get(key), value)
-
-    def test_validate_config_valid(self):
-        config = '{"from": "2014-03-03", "limit": 5}'
-
-        config = self.harvester.validate_config(config)
-
-        assert isinstance(config, basestring)
-        assert 'limit' in config
-
-    def test_validate_config_invalid(self):
-        config = '{"from": 100, "limit": 5}'
-
-        # 'from' is not a string so should throw an error
-        self.assertRaises(TypeError, self.harvester.validate_config, (config))
-
-    def test_fetch_xml(self):
-        package = self.harvester.fetch_xml("file://%s" % _get_fixture('helda.xml'), {})
-        assert package.get('name', None).startswith('urn-nbn-fi-csc-kata')
-        pid_ids = [pid.get('id') for pid in package.get('pids', [])]
-        self.assertTrue(u'http://hdl.handle.net/10138/8487' in pid_ids)
-
-    def test_parse_xml(self):
-        with open(_get_fixture('helda.xml'), 'r') as source:
-            package = self.harvester.parse_xml(source.read(), {})
-            assert package.get('name', None).startswith('urn-nbn-fi-csc-kata')
-            pid_ids = [pid.get('id') for pid in package.get('pids', [])]
-            self.assertTrue(u'http://hdl.handle.net/10138/8487' in pid_ids)
-
-
-class TestIdaHarvester(TestCase):
-    @classmethod
-    def setup_class(cls):
-        ''' Setup database and variables '''
-        harvest_model.setup()
-        kata_model.setup()
-        cls.harvester = IdaHarvester()
-
-    def tearDown(self):
-        """ rebuild database """
-        ckan.model.repo.rebuild_db()
-
-    def test_fetch_xml(self):
-        package = self.harvester.fetch_xml("file://%s" % _get_fixture('ida.xml'), {})
-        assert package.get('name', None).startswith('urn-nbn-fi-csc-kata')
-        pid_ids = [pid.get('id') for pid in package.get('pids', [])]
-        self.assertTrue(u'urn:nbn:fi:csc-ida2014010800372s' in pid_ids)
-
-    def test_parse_xml(self):
-        with open(_get_fixture('ida.xml'), 'r') as source:
-            package = self.harvester.parse_xml(source.read(), {})
-            assert package.get('name', None).startswith('urn-nbn-fi-csc-kata')
-            pid_ids = [pid.get('id') for pid in package.get('pids', [])]
-            self.assertTrue(u'urn:nbn:fi:csc-ida2014010800372s' in pid_ids)
 
 
 class TestCMDIHarvester(TestCase):
@@ -256,7 +63,7 @@ class TestCMDIHarvester(TestCase):
         record = _get_record(xml)
 
         metadata = CmdiReader()(record)
-        metadata['unified']['owner_org'] = "test"
+        metadata['package_dict']['owner_org'] = "test"
 
         harvest_object = HarvestObject()
         harvest_object.content = json.dumps(metadata.getMap())
@@ -274,9 +81,7 @@ class TestCMDIHarvester(TestCase):
         record = _get_record("cmdi_1.xml")
         metadata = CmdiReader("http://localhost/test")(record)
         content= metadata.getMap()
-        package = content['unified']
-        self.assertEquals(package.get('name', None), utils.pid_to_name(package.get('id', None)))
-        self.assertEquals(utils.get_primary_pid(package), u'http://urn.fi/urn:nbn:fi:lb-20140730180')
+        package = content['package_dict']
         self.assertEquals(package.get('notes', None), '{"eng": "Test description"}')
         self.assertEquals(package.get('version', None), '2012-09-07')
         self.assertEquals(package.get('title', []), '{"eng": "Longi Corpus"}')
@@ -296,14 +101,12 @@ class TestCMDIHarvester(TestCase):
         job.save()
 
         harvest_object = self._run_import("cmdi_1.xml", job)
-        package_id = json.loads(harvest_object.content)['unified']['id']
+        package_id = json.loads(harvest_object.content)['package_dict']['id']
 
         self.assertEquals(len(harvest_object.errors), 0, u"\n".join(unicode(error.message) for error in (harvest_object.errors or [])))
 
         package = get_action('package_show')({'user': 'harvest'}, {'id': package_id})
 
-        self.assertEquals(package.get('name', None), utils.pid_to_name(package.get('id', None)))
-        self.assertEquals(utils.get_primary_pid(package), u'http://urn.fi/urn:nbn:fi:lb-20140730180')
         self.assertEquals(package.get('notes', None), u'{"eng": "Test description"}')
         self.assertEquals(package.get('version', None), '2012-09-07')
         self.assertEquals(package.get('title', []), '{"eng": "Longi Corpus"}')
@@ -320,7 +123,7 @@ class TestCMDIHarvester(TestCase):
         model.Session.flush()
 
         harvest_object = self._run_import("cmdi_2.xml", job)
-        package_id = json.loads(harvest_object.content)['unified']['id']
+        package_id = json.loads(harvest_object.content)['package_dict']['id']
 
         self.assertEquals(len(harvest_object.errors), 0, u"\n".join(unicode(error.message) for error in (harvest_object.errors or [])))
 
@@ -356,257 +159,3 @@ class TestCMDIHarvester(TestCase):
             package = self.harvester.parse_xml(source.read(), {})
             self.assertEquals(package.get('notes', None), '{"eng": "Test description"}')
             self.assertEquals(package.get('version', None), '2012-09-07')
-
-
-class TestOAIDCReaderHelda(TestCase):
-    '''
-    Tests for reading OAI_DC metadata generated from Helda
-    '''
-
-    @classmethod
-    def setup_class(cls):
-        '''
-        Setup variables
-        '''
-        cls.xml_file = open(_get_fixture(FIXTURE_HELDA), 'r')
-        cls.xml = cls.xml_file.read()
-
-        cls.bs = bs4.BeautifulSoup(cls.xml, 'xml')
-        cls.dc = cls.bs.metadata.dc
-
-    @classmethod
-    def teardown_class(cls):
-        pass
-
-    def test_dc_metadata_reader(self):
-        '''
-        Test reading a whole file
-        '''
-
-        metadata = dcr.dc_metadata_reader('default')(etree.fromstring(self.xml))
-
-        assert metadata
-
-        assert 'unified' in metadata.getMap()
-        assert 'availability' in metadata.getMap()['unified']
-
-    def test_filter_tag_name_namespace(self):
-        output = dcr._filter_tag_name_namespace('creator', dcr.NS['dc'])
-        creators = [creator for creator in self.dc(output, recursive=False)]
-
-        assert len(creators) == 3
-
-    def test_get_data_pids(self):
-        expected_pids = set([u'http://link.aip.org/link/?jcp/123/064507', u'http://hdl.handle.net/10138/1074'])
-        output = dcr._get_data_pids(self.dc)
-
-        assert set(output) == expected_pids
-
-    def test_get_download(self):
-        output = dcr._get_download(self.dc)
-
-        # We should get at least some download link from the pids:
-        assert len(list(output)) > 0
-
-    def test_get_org_auth(self):
-        output = dcr._get_org_auth(self.dc)
-
-        org_auth = []
-        auths = []
-        for row in output:
-            org_auth.append(row)
-            auths.append(row.get('value'))
-
-        assert org_auth
-        assert auths
-
-        assert u"Khriachtchev, Leonid" in auths
-        assert u"Räsänen, Markku" in auths
-
-    def test_get_rights(self):
-        output = dcr._get_rights(self.dc)
-
-        values = list(output)
-        assert len(values) == 4
-
-        license_url = values[2]
-
-        assert license_url
-        assert license_url.startswith('Copyright')
-
-    def test_dc_metadata_reader_fields(self):
-        '''
-        Test reading a whole file and check that fields are what they are supposed to be
-        '''
-        EXPECTED_FIELDS = {'access_application_URL': '',
-                           'access_request_URL': '',
-                           'algorithm': '',
-                           'availability': 'contact_owner',
-                           'checksum': '',
-                           'contact': [],
-                           'direct_download_URL': u'http://link.aip.org/link/?jcp/123/064507',
-                           'discipline': '',
-                           'geographic_coverage': '',
-                           #'langtitle': [{'lang': '',
-                           #               'value': u'Neutralization of solvated protons and formation of noble-gas hydride molecules: matrix-isolation indications of tunneling mechanisms?'}],
-                           'title': '{"und": "Neutralization of solvated protons and formation of noble-gas hydride molecules: matrix-isolation indications of tunneling mechanisms?"}',
-                           'language': u'en',
-                           'license_URL': u'Copyright 2005 American Institute of Physics. This article may be downloaded for personal use only. Any other use requires prior permission of the author and the American Institute of Physics.',
-                           'license_id': 'notspecified',
-                           'mimetype': '',
-                           'notes': '{"und": ""}',
-                           'pids': [{'type': u'relation',
-                                     'relation': u'generalRelation',
-                                     'id': u'http://link.aip.org/link/?jcp/123/064507',
-                                     'provider': u'http://helda.helsinki.fi/oai/request'},
-                                    {'id': u'http://hdl.handle.net/10138/1074',
-                                     'provider': u'http://helda.helsinki.fi/oai/request',
-                                     'type': u'relation',
-                                     'relation': u'generalRelation'},
-                                    ],
-                           'tag_string': '',
-                           'temporal_coverage_begin': '',
-                           'temporal_coverage_end': '',
-                           'type': 'dataset',
-                           'version': u'2005-08-08',
-                           'uploader': u''}
-
-        metadata = dcr.dc_metadata_reader('default')(etree.fromstring(self.xml))
-        assert metadata
-
-        data_dict = metadata['unified']
-
-        temp = copy.copy(data_dict)
-
-        temp.pop('agent')   # TODO: Compare also agents directly
-
-        temp.pop('id') # Do not compare id since it is always generated by Etsin
-        temp.pop('name') # Do not compare id since it is always generated by Etsin
-
-        ### Pid reform introduced some changes that can't be validated with a 
-        ### simple dict compare
-        # Do not compare primary pid generated by Etsin
-        temp['pids'] = [pid for pid in temp['pids'] if pid['type'] != u'primary']
-        # Smear url value may be any data pid id
-        if temp['smear_url'] in \
-        ['http://link.aip.org/link/?jcp/123/064507', 'http://hdl.handle.net/10138/1074']:
-            temp.pop('smear_url')
-
-        testfixtures.compare(temp, EXPECTED_FIELDS)
-
-        # for (key, value) in EXPECTED_FIELDS.items():
-        #     assert key in data_dict, "Key not found: %r" % key
-        #
-        #     output_value = data_dict.get(key)
-        #
-        #     # Note. Possibility for random fail, because data order is not promised by python
-        #     # TODO: testfixtures.compare() could be used here to prevent random failing
-        #     assert unicode(output_value) == unicode(value), "Values for key %r not matching: %r versus %r" % (
-        #         key, value, output_value)
-
-        fail_agent = 1
-        fail_author = 3
-        for agent in data_dict.get('agent', []):
-            if agent['role'] == 'funder':
-                for key, value in ('URL', ''), ('id', ''), ('fundingid', ''), ('name', ''):
-                    self.assertTrue(key in agent, "Expected to find key %s" % key)
-                    self.assertEquals(agent[key], value)
-                fail_agent -= 1
-            elif agent['role'] == 'author':
-                self.assertTrue(agent['name'] in (u'Khriachtchev, Leonid', u'Lignell, Antti', u'R\xe4s\xe4nen, Markku'))
-                fail_author -= 1
-
-        self.assertEqual(fail_agent, 0, "Invalid agent data")
-        self.assertEqual(fail_author, 0, "Invalid author data")
-
-    # TODO: Implement this in harvester first
-    # def test_get_provider(self):
-    #     output = dcr._get_provider(self.dc)
-    #
-    #     assert output == u'http://helda.helsinki.fi/oai/request', output
-
-    def test_get_contributor(self):
-        output = dcr._get_contributor(self.dc)
-
-        assert len(list(output)) == 0  # No contributors in Helda
-
-
-class TestOAIDCReaderIda(TestCase):
-
-    @classmethod
-    def setup_class(cls):
-        '''
-        Setup variables
-        '''
-        cls.xml_file = open(_get_fixture(FIXTURE_IDA), 'r')
-        cls.xml = cls.xml_file.read()
-
-        cls.bs = bs4.BeautifulSoup(cls.xml, 'xml')
-        cls.dc = cls.bs.metadata.dc
-
-    @classmethod
-    def teardown_class(cls):
-        pass
-
-    def test_dc_metadata_reader(self):
-        '''
-        Test reading a whole file
-        '''
-
-        metadata = dcr.dc_metadata_reader('default')(etree.fromstring(self.xml))
-
-        assert metadata
-
-        assert 'unified' in metadata.getMap()
-        assert 'availability' in metadata.getMap()['unified']
-
-    def test_get_version_pid(self):
-        tests = ((dcr.IdaDcMetadataReader, 'ida.xml', True), (dcr.DefaultDcMetadataReader, 'helda.xml', False),
-                 (dcr.IdaDcMetadataReader, 'oai-pmh.xml', True))
-        for reader_class, xml, ida in tests:
-            reader = reader_class(_get_record(xml))
-            # Testing private method. This can be removed when manual tests start to work.
-            pid = reader._get_version_pids()  # pylint: disable=W0212
-            if ida:
-                self.assertTrue(bool(pid))
-            else:
-                self.assertFalse(bool(pid))
-
-    def test_get_checksum(self):
-        hash = dcr._get_checksum(self.dc)
-
-        assert hash == u'7932df5999a30bb70871359f700dbe23'
-
-    def test_get_download(self):
-        output = dcr._get_download(self.dc)
-
-        # We should get at least some download link:
-        assert len(list(output)) > 0
-
-    def test_get_provider(self):
-        output = dcr._get_provider(self.dc)
-
-        assert output == 'ida', output
-
-    def test_get_contributor(self):
-        output = dcr._get_contributor(self.dc)
-
-        contributors = list(output)
-        assert len(contributors) == 2, contributors
-        assert contributors[0].get('value') == 'test1', contributors
-        assert contributors[1].get('value') == 'test2', contributors
-
-    def test_get_rightsholder(self):
-        output = dcr._get_rightsholder(self.dc)
-
-        holders = list(output)
-        assert len(holders) == 1, holders
-        assert holders[0] == 'http://orcid.org/0000-0003-0296-7410', holders
-
-
-class TestImportFormats(TestCase):
-    def test_create_metadata_registry(self):
-        reg = create_metadata_registry()
-
-        assert reg
-        assert reg.hasReader('oai_dc')
