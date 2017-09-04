@@ -1,26 +1,21 @@
-# coding: utf-8
-# vi:et:ts=8:
 import logging
 import json
-from itertools import islice
 
 import oaipmh.client
 import oaipmh.error
-from dateutil.parser import parse as dp
-from ckan.controllers.api import get_action
 
 import importformats
 
 from ckan.model import Session, Package
 from ckan import model
-
-from ckanext.harvest.model import HarvestJob, HarvestObject
-from ckanext.harvest.model import HarvestObjectExtra as HOExtra
+from ckan import plugins as p
+from ckanext.harvest.model import HarvestJob, HarvestObject, HarvestObjectExtra as HOExtra
 from ckanext.harvest.harvesters.base import HarvesterBase
-import ckanext.etsin.actions as actions
+
 import fnmatch
 import re
-import ckanext.oaipmh.utils as utils
+import uuid
+import dateutil
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +24,6 @@ class OAIPMHHarvester(HarvesterBase):
     '''
     OAI-PMH Harvester
     '''
-    md_format = "oai_dc"
 
     def _get_configuration(self, harvest_job):
         """ Parse configuration from given harvest object """
@@ -44,61 +38,12 @@ class OAIPMHHarvester(HarvesterBase):
                 raise
         return configuration
 
-    def _recreate(self, harvest_object):
-        """ Check if packages should be recreated or not.
-            Default for IDA is false. For other true.
-            Configuration parameter is `recreate`.
-        """
-        configuration = self._get_configuration(harvest_object)
-        return configuration.get('recreate', configuration.get('type') != 'ida')
-
-    def on_deleted(self, harvest_object, header):
-        """ Called when metadata is deleted from server.
-            Return False if dataset is ignored.
-        """
-        log.info("Metadata is deleted for %s. Ignoring.", harvest_object.guid)
-        return False
-
     def metadata_registry(self, config, harvest_job):
         harvest_type = config.get('type', 'default')
         return importformats.create_metadata_registry(harvest_type, harvest_job.source.url)
 
-    def info(self):
-        '''
-        Harvesting implementations must provide this method, which will return a
-        dictionary containing different descriptors of the harvester. The
-        returned dictionary should contain:
-
-        * name: machine-readable name. This will be the value stored in the
-          database, and the one used by ckanext-harvest to call the appropiate
-          harvester.
-        * title: human-readable name. This will appear in the form's select box
-          in the WUI.
-        * description: a small description of what the harvester does. This will
-          appear on the form as a guidance to the user.
-
-        A complete example may be::
-
-            {
-                'name': 'csw',
-                'title': 'CSW Server',
-                'description': 'A server that implements OGC's Catalog Service
-                                for the Web (CSW) standard'
-            }
-
-        :returns: A dictionary with the harvester descriptors
-        '''
-        return {
-            'name': 'oai-pmh',
-            'title': 'OAI-PMH DC',
-            'description': 'Harvests OAI-PMH providers'
-        }
-
     def validate_config(self, config):
         '''
-
-        [optional]
-
         Harvesters can provide this method to validate the configuration entered in the
         form. It should return a single string, which will be stored in the database.
         Exceptions raised will be shown in the form's error messages.
@@ -117,62 +62,32 @@ class OAIPMHHarvester(HarvesterBase):
                 raise TypeError("'{p}' needs to be a '{t}'".format(t=t, p=p))
             return p in d
 
-        def validate_date_param(d, p, t):
-            '''
-            Validate a date parameter by trying to parse it
-            '''
-            if validate_param(d, p, t):
-                dp(d[p]).replace(tzinfo=None)
-
         # Todo: Write better try/except cases
         if config:
             dj = json.loads(config)
             validate_param(dj, 'set', list)
-            validate_param(dj, 'limit', int)
             validate_param(dj, 'type', basestring)
-            validate_date_param(dj, 'until', basestring)
-            validate_date_param(dj, 'from', basestring)
         else:
             config = '{}'
         return config
 
-    # def get_original_url(self, harvest_object_id):
-    #     '''
-    #
-    #     [optional]
-    #
-    #     This optional but very recommended method allows harvesters to return
-    #     the URL to the original remote document, given a Harvest Object id.
-    #     Note that getting the harvest object you have access to its guid as
-    #     well as the object source, which has the URL.
-    #     This URL will be used on error reports to help publishers link to the
-    #     original document that has the errors. If this method is not provided
-    #     or no URL is returned, only a link to the local copy of the remote
-    #     document will be shown.
-    #
-    #     Examples:
-    #         * For a CKAN record: http://{ckan-instance}/api/rest/{guid}
-    #         * For a WAF record: http://{waf-root}/{file-name}
-    #         * For a CSW record: http://{csw-server}/?Request=GetElementById&Id={guid}&...
-    #
-    #     :param harvest_object_id: HarvestObject id
-    #     :returns: A string with the URL to the original document
-    #     '''
+    def on_deleted(self, harvest_object, header):
+        """ See :meth:`OAIPMHHarvester.on_deleted`
+            Mark package for deletion.
+        """
+        if header.identifier():
+            harvest_object.package_id = header.identifier()
+        harvest_object.content = None
+        harvest_object.report_status = "deleted"
+        harvest_object.save()
+        return True
 
-    def get_package_ids(self, set_ids, config, last_time, client):
+    def get_record_identifiers(self, set_ids, config, client):
         ''' Get package identifiers from given set identifiers.
         '''
-        def filter_map_args(list_tuple):
-            for key, value in list_tuple:
-                if key in ['until', 'from']:
-                    if key == 'from':
-                        key = 'from_'
-                    yield (key, dp(value).replace(tzinfo=None))
 
-        kwargs = dict(filter_map_args(config.items()))
+        kwargs = dict(config.items())
         kwargs['metadataPrefix'] = self.md_format
-        if last_time and 'from_' not in kwargs:
-            kwargs['from_'] = dp(last_time).replace(tzinfo=None)
         if set_ids:
             for set_id in set_ids:
                 try:
@@ -186,7 +101,85 @@ class OAIPMHHarvester(HarvesterBase):
                     yield header.identifier()
             except oaipmh.error.NoRecordsMatchError:
                 pass
-                # package_ids = [header.identifier() for header in client.listRecords()]
+
+    def populate_harvest_job(self, harvest_job, set_ids, config, client):
+        # Check if this source has been harvested before
+        previous_job = Session.query(HarvestJob) \
+            .filter(HarvestJob.source == harvest_job.source) \
+            .filter(HarvestJob.gather_finished != None) \
+            .filter(HarvestJob.id != harvest_job.id) \
+            .order_by(HarvestJob.gather_finished.desc()) \
+            .limit(1).first()
+
+        # Collect record identifiers
+        record_identifiers = list(self.get_record_identifiers(set_ids, config, client))
+        log.debug('Record identifiers: %s', record_identifiers)
+
+        if previous_job:
+            for previous_error in [error.guid for error in Session.query(HarvestObject).
+                                   filter(HarvestObject.harvest_job_id == previous_job.id).
+                                   filter(HarvestObject.state == 'ERROR').all()]:
+                if previous_error not in record_identifiers:
+                    record_identifiers.append(previous_error)
+        try:
+            object_ids = []
+            if len(record_identifiers):
+
+                query = model.Session.query(HarvestObject.guid, HarvestObject.package_id). \
+                    filter(HarvestObject.current == True). \
+                    filter(HarvestObject.harvest_source_id == harvest_job.source.id)
+
+                db_guid_to_package_id = {}
+                for ho_in_db_guid, ho_in_db_package_id in query:
+                    db_guid_to_package_id[ho_in_db_guid] = ho_in_db_package_id
+
+                guids_in_db = set(db_guid_to_package_id.keys())
+                guids_in_harvest = set(record_identifiers)
+
+                new = guids_in_harvest - guids_in_db
+                delete = guids_in_db - guids_in_harvest
+                change = guids_in_db & guids_in_harvest
+
+                for guid in new:
+                    obj = HarvestObject(guid=guid, job=harvest_job,
+                                        extras=[HOExtra(key='status', value='new')])
+                    obj.save()
+                    object_ids.append(obj.id)
+                for guid in change:
+                    obj = HarvestObject(guid=guid, job=harvest_job,
+                                        package_id=db_guid_to_package_id[guid],
+                                        extras=[HOExtra(key='status', value='change')])
+                    obj.save()
+                    object_ids.append(obj.id)
+                for guid in delete:
+                    obj = HarvestObject(guid=guid, job=harvest_job,
+                                        package_id=db_guid_to_package_id[guid],
+                                        extras=[HOExtra(key='status', value='delete')])
+                    model.Session.query(HarvestObject). \
+                        filter_by(guid=guid). \
+                        update({'current': False}, False)
+                    obj.save()
+                    object_ids.append(obj.id)
+
+                log.debug('Object ids: {i}'.format(i=object_ids))
+                return object_ids
+            else:
+                self._save_gather_error('No packages received for URL: {u}'.format(
+                    u=harvest_job.source.url), harvest_job)
+                return None
+        except Exception as e:
+            self._save_gather_error('Gather: {e}'.format(e=e), harvest_job)
+            raise
+
+    def _get_object_extra(self, harvest_object, key):
+        '''
+        Helper function for retrieving the value from a harvest object extra,
+        given the key
+        '''
+        for extra in harvest_object.extras:
+            if extra.key == key:
+                return extra.value
+        return None
 
     def gather_stage(self, harvest_job):
         '''
@@ -207,6 +200,7 @@ class OAIPMHHarvester(HarvesterBase):
         :returns: A list of HarvestObject ids
         :type harvest_job: HarvestJob
         '''
+        log.debug('Starting gather stage')
         log.debug('Harvest source: %s', harvest_job.source.url)
 
         config = self._get_configuration(harvest_job)
@@ -217,7 +211,7 @@ class OAIPMHHarvester(HarvesterBase):
 
         available_sets = list(client.listSets())
 
-        log.debug('available sets: %s', available_sets)
+        log.debug('Available sets: %s', available_sets)
 
         set_ids = set()
         for set_id in config.get('set', []):
@@ -228,7 +222,6 @@ class OAIPMHHarvester(HarvesterBase):
                     if matcher.match(set_spec):
                         set_ids.add(set_spec)
                         found = True
-
                 if not found:
                     log.warning("No sets found with given wildcard string: %s", set_id)
             else:
@@ -236,64 +229,9 @@ class OAIPMHHarvester(HarvesterBase):
                     log.warning("Given set %s is not in available sets. Not removing.", set_id)
                 set_ids.add(set_id)
 
-        log.debug('Sets in config: %s', set_ids)
+        if len(set_ids):
+            log.debug('Sets in config: %s', set_ids)
         return self.populate_harvest_job(harvest_job, set_ids, config, client)
-
-    def populate_harvest_job(self, harvest_job, set_ids, config, client, catalog_id=None):
-        # Check if this source has been harvested before
-        previous_job = Session.query(HarvestJob) \
-            .filter(HarvestJob.source == harvest_job.source) \
-            .filter(HarvestJob.gather_finished != None) \
-            .filter(HarvestJob.id != harvest_job.id) \
-            .order_by(HarvestJob.gather_finished.desc()) \
-            .limit(1).first()
-        last_time = None
-        if previous_job and previous_job.finished and model.Package.get(harvest_job.source.id).metadata_modified < previous_job.gather_started:
-            last_time = previous_job.gather_started.isoformat()
-
-        # Collect package ids
-        package_ids = list(self.get_package_ids(set_ids, config, last_time, client))
-        log.debug('Identifiers: %s', package_ids)
-
-        if not self._recreate(harvest_job) and package_ids:
-            converted_identifiers = {}
-            for identifier in package_ids:
-                converted_identifiers[utils.pid_to_name(identifier)] = identifier
-                if identifier.endswith(u'm'):
-                    converted_identifiers[utils.pid_to_name(u"%ss" % identifier[0:-1])] = identifier
-
-            for package in model.Session.query(model.Package).filter(model.Package.name.in_(converted_identifiers.keys())).all():
-                converted_name = package.name
-                if converted_identifiers[converted_name] not in package_ids:
-                    converted_name = "%sm" % converted_name[0:-1]
-                package_ids.remove(converted_identifiers[converted_name])
-
-        if previous_job:
-            for previous_error in [error.guid for error in Session.query(HarvestObject).
-                                   filter(HarvestObject.harvest_job_id == previous_job.id).
-                                   filter(HarvestObject.state == 'ERROR').all()]:
-                if previous_error not in package_ids:
-                    package_ids.append(previous_error)
-
-        try:
-            object_ids = []
-            if len(package_ids):
-                for package_id in islice(package_ids, config['limit']) if 'limit' in config else package_ids:
-                    # Create a new HarvestObject for this identifier
-                    obj = HarvestObject(guid=package_id, job=harvest_job, extras=[])
-                    if catalog_id:
-                        obj.extras.append(HOExtra(key='catalog_id', value=catalog_id))
-                    obj.save()
-                    object_ids.append(obj.id)
-                log.debug('Object ids: {i}'.format(i=object_ids))
-                return object_ids
-            else:
-                self._save_gather_error('No packages received for URL: {u}'.format(
-                    u=harvest_job.source.url), harvest_job)
-                return None
-        except Exception as e:
-            self._save_gather_error('Gather: {e}'.format(e=e), harvest_job)
-            raise
 
     def fetch_stage(self, harvest_object):
         '''
@@ -307,16 +245,13 @@ class OAIPMHHarvester(HarvesterBase):
         :param harvest_object: HarvestObject object
         :returns: True if everything went right, False if errors were found
         '''
-        log.debug("fetch: %s", harvest_object.guid)
+        log.debug("Fetch stage for harvest object with guid: %s", harvest_object.guid)
         # Get metadata content from provider
         try:
-            # Create a OAI-PMH Client
+            # Create a OAI-PMH Client and get record
             config = self._get_configuration(harvest_object)
-
             registry = self.metadata_registry(config, harvest_object)
             client = oaipmh.client.Client(harvest_object.job.source.url, registry)
-
-            # Get source URL
             header, metadata, _about = client.getRecord(identifier=harvest_object.guid, metadataPrefix=self.md_format)
         except Exception as e:
             import traceback
@@ -327,6 +262,10 @@ class OAIPMHHarvester(HarvesterBase):
 
         if header and header.isDeleted():
             return self.on_deleted(harvest_object, header)
+
+        if header and header.datestamp():
+            harvest_object.metadata_modified_date = header.datestamp()
+            harvest_object.save()
 
         # Get contents
         try:
@@ -359,70 +298,96 @@ class OAIPMHHarvester(HarvesterBase):
         :param harvest_object: HarvestObject object
         :returns: True if everything went right, False if errors were found
         '''
+
+        log.debug('Import stage for harvest object with guid: %s', harvest_object.guid)
+
         if not harvest_object:
             log.error('No harvest object received')
             return False
 
-        if harvest_object.report_status == "deleted":
-            if harvest_object.package_id:
-                get_action('package_delete')({'model': model, 'session': model.Session, 'user': 'harvest'}, {'id': harvest_object.package_id})
-                return True
+        context = {
+            'model': model,
+            'session': model.Session,
+            'user': 'harvest',
+        }
+
+        status = self._get_object_extra(harvest_object, 'status')
+
+        if status == 'delete':
+            # Delete package
+            context.update({
+                'ignore_auth': True,
+            })
+            p.toolkit.get_action('package_delete')(context, {'id': harvest_object.package_id})
+            log.info('Deleted package {0} with guid {1}'.format(harvest_object.package_id, harvest_object.guid))
             return True
 
-        if not harvest_object.content:
-            self._save_object_error('Import: Empty content for object {id}'.format(
-                id=harvest_object.id), harvest_object)
-
+        if harvest_object.content is None:
+            self._save_object_error('Empty content for object {0}'.format(harvest_object.id), harvest_object, 'Import')
             return False
 
+        previous_object = model.Session.query(HarvestObject) \
+            .filter(HarvestObject.guid == harvest_object.guid) \
+            .filter(HarvestObject.current == True) \
+            .first()
+
+        # Flag previous object as not current anymore
+        if previous_object:
+            previous_object.current = False
+            previous_object.add()
+
+        # Flag this object as the current one
+        harvest_object.current = True
+        harvest_object.add()
+
+        # Get mapped package_dict
         content = json.loads(harvest_object.content)
-        # import pprint; pprint.pprint(content)
+        package_dict = content.pop('package_dict')
 
-        package_dict = content.pop('unified')
-        package_dict['xpaths'] = content
+        context.update({
+            'return_id_only': True})
 
-        # Set data catalog id to package_dict, if it exists in
-        # HarvestObjectExtra objects
-        for ho in harvest_object.extras:
-            if ho.key == 'catalog_id':
-                package_dict['data_catalog'] = ho.value
-                break
+        if status == 'new':
+            package_dict['id'] = unicode(uuid.uuid4())
 
-        # If package exists use old PID, otherwise create new
-        pkg_id = utils.get_package_id_by_primary_pid(package_dict)
-        pkg = Session.query(Package).filter(Package.id == pkg_id).first() if pkg_id else None
-        log.debug('Package: "{pkg}"'.format(pkg=pkg))
+            try:
+                package_id = p.toolkit.get_action('package_create')(context, package_dict)
 
-        if pkg and not self._recreate(harvest_object):
-            log.debug("Not re-creating package: %s", pkg_id)
-            return True
-        if not package_dict.get('id', None):
-            package_dict['id'] = pkg.id if pkg else utils.generate_pid()
+                # Save reference to the package on the object
+                harvest_object.package_id = package_id
+                harvest_object.add()
+                # Defer constraints and flush so the dataset can be indexed with
+                # the harvest object id (on the after_show hook from the harvester
+                # plugin)
+                model.Session.execute('SET CONSTRAINTS harvest_object_package_id_fkey DEFERRED')
+                model.Session.flush()
+                log.info('Created new package %s with guid %s', package_id, harvest_object.guid)
+            except p.toolkit.ValidationError, e:
+                self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
+                return False
 
-        uploader = ''
+        elif status == 'change':
 
-        try:
-            package = model.Package.get(harvest_object.harvest_source_id)
-            if package and package.owner_org:
-                package_dict['owner_org'] = package.owner_org
+            # Check if the modified date is more recent
+            if previous_object and harvest_object.metadata_modified_date <= previous_object.metadata_modified_date:
 
-            config = self._get_configuration(harvest_object)
-            if config.get('type') == 'ida':
-                if package_dict.get('owner_org', False):
-                    package_dict['private'] = "true"
-                uploader = package_dict.get('uploader', False)
-                package_dict.pop('uploader')
-            if config.get('type') == 'ida':
-                package_dict['persist_schema'] = u'True'
-            context = {'user': 'harvest'}
-            from pprint import pprint
-            log.debug(pprint(package_dict))
-            result = actions.package_create(context, package_dict)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self._save_object_error('Import: Could not create {id}. {e}'.format(
-                id=harvest_object.id, e=e), harvest_object)
-            return False
+                # Assign the previous job id to the new object to
+                # avoid losing history
+                harvest_object.harvest_job_id = previous_object.job.id
+                harvest_object.add()
 
-        return result
+                # Delete the previous object to avoid cluttering the object table
+                previous_object.delete()
+                log.info('Document with GUID %s unchanged, skipping...' % (harvest_object.guid))
+            else:
+                package_dict['id'] = harvest_object.package_id
+                try:
+                    package_id = p.toolkit.get_action('package_update')(context, package_dict)
+                    log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
+                except p.toolkit.ValidationError, e:
+                    self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
+                    return False
+
+        model.Session.commit()
+
+        return True

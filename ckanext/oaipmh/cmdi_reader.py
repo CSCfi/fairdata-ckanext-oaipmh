@@ -1,14 +1,7 @@
-from ckanext.oaipmh.importcore import generic_xml_metadata_reader
 import oaipmh.common
-
 from pylons import config
-
+from ckanext.oaipmh.importcore import generic_xml_metadata_reader
 from ckanext.etsin.mappers.cmdi import cmdi_mapper
-
-
-class CmdiReaderException(Exception):
-    """ Reader exception is thrown on unexpected data or error. """
-    pass
 
 
 class CmdiReader(object):
@@ -38,5 +31,5 @@ class CmdiReader(object):
         :return: oaipmh.common.Metadata object generated from xml
         """
         result = generic_xml_metadata_reader(xml).getMap()
-        result['unified'] = cmdi_mapper(dict(xml=xml), dict(package_dict={}))
+        result['package_dict'] = cmdi_mapper(dict(xml=xml), dict(package_dict={}))
         return oaipmh.common.Metadata(xml, result)
