@@ -76,6 +76,7 @@ class OAIPMHHarvester(HarvesterBase):
         '''
 
         kwargs = dict(config.items())
+        kwargs.pop('data_catalog_id')
         kwargs['metadataPrefix'] = self.md_format
         if set_ids:
             for set_id in set_ids:
