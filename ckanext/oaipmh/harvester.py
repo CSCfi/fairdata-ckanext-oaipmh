@@ -6,6 +6,7 @@ import oaipmh.error
 
 import importformats
 
+from ckan import logic
 from ckan.model import Session, Package
 from ckan import model
 from ckan import plugins as p
@@ -67,6 +68,7 @@ class OAIPMHHarvester(HarvesterBase):
             dj = json.loads(config)
             validate_param(dj, 'set', list)
             validate_param(dj, 'type', basestring)
+            validate_param(dj, 'data_catalog_id', basestring)
         else:
             config = '{}'
         return config
@@ -299,13 +301,18 @@ class OAIPMHHarvester(HarvesterBase):
                 u=harvest_object.source.url, e=e), harvest_object)
             return False
 
-        if status == 'delete':
+        if status == 'deleted':
             # Delete package
-            context.update({
-                'ignore_auth': True,
-            })
-            p.toolkit.get_action('package_delete')(context, {'id': harvest_object.package_id})
-            log.info('Deleted package {0} with guid {1}'.format(harvest_object.package_id, harvest_object.guid))
+            context.update({'ignore_auth': True})
+            try:
+                logic.get_action('package_show')(context, {'id': harvest_object.package_id})
+                p.toolkit.get_action('package_delete')(context, {'id': harvest_object.package_id})
+                log.info('Deleted package {0} with guid {1}'.format(harvest_object.package_id, harvest_object.guid))
+            except p.toolkit.ObjectNotFound:
+                log.info('Data with guid {0} was marked as deleted but was not found in local database'.format(
+                    harvest_object.guid))
+                pass
+
             return True
 
         if harvest_object.content is None:
@@ -341,6 +348,8 @@ class OAIPMHHarvester(HarvesterBase):
             package_dict['id'] = unicode(uuid.uuid4())
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
+                if not package_id:
+                    return False
 
                 # Save reference to the package on the object
                 harvest_object.package_id = package_id
@@ -372,11 +381,12 @@ class OAIPMHHarvester(HarvesterBase):
                 package_dict['id'] = harvest_object.package_id
                 try:
                     package_id = p.toolkit.get_action('package_update')(context, package_dict)
+                    if not package_id:
+                        return False
                     log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
                 except p.toolkit.ValidationError, e:
                     self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
                     return False
 
         model.Session.commit()
-
         return True
