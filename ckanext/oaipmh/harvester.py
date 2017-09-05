@@ -6,7 +6,6 @@ import oaipmh.error
 
 import importformats
 
-from ckan import logic
 from ckan.model import Session, Package
 from ckan import model
 from ckan import plugins as p
@@ -129,7 +128,6 @@ class OAIPMHHarvester(HarvesterBase):
                 guids_in_harvest = set(record_identifiers)
 
                 new = guids_in_harvest - guids_in_db
-                delete = guids_in_db - guids_in_harvest
                 change = guids_in_db & guids_in_harvest
 
                 for guid in new:
@@ -143,15 +141,9 @@ class OAIPMHHarvester(HarvesterBase):
                                         extras=[HOExtra(key='status', value='change')])
                     obj.save()
                     object_ids.append(obj.id)
-                for guid in delete:
-                    obj = HarvestObject(guid=guid, job=harvest_job,
-                                        package_id=db_guid_to_package_id[guid],
-                                        extras=[HOExtra(key='status', value='delete')])
-                    model.Session.query(HarvestObject). \
-                        filter_by(guid=guid). \
-                        update({'current': False}, False)
-                    obj.save()
-                    object_ids.append(obj.id)
+                # Deleted datasets are handled later using object_ids as the list of
+                # identifiers for getting identifiers that are inspected whether they
+                # are deleted.
 
                 log.debug('Object ids: {i}'.format(i=object_ids))
                 return object_ids
@@ -289,6 +281,29 @@ class OAIPMHHarvester(HarvesterBase):
             harvest_object.metadata_modified_date = header.datestamp()
             harvest_object.save()
 
+        if header and header.isDeleted():
+            harvest_object.content = None
+            harvest_object.report_status = "delete"
+            harvest_object.save()
+
+            # Delete package
+            try:
+                # Assuming harvest_object having package_id is indicative of stored package in local database
+                if harvest_object.package_id:
+                    context.update({'ignore_auth': True})
+                    p.toolkit.get_action('package_delete')(context, {'id': harvest_object.package_id})
+                    log.info('Deleted package with id {0}'.format(harvest_object.package_id))
+                else:
+                    log.info('Data with identifier {0} was marked deleted in the API but harvest object does not have a package id, which indicates it is not found in local database either'.format(
+                        harvest_object.guid))
+            except p.toolkit.ObjectNotFound:
+                log.debug("Tried to delete package with id {0}, but could not find it".format(harvest_object.package_id))
+                pass
+
+            #Stop processing when some identifier is marked as deleted
+            return True
+
+
         # Get contents
         try:
             content = json.dumps(metadata.getMap())
@@ -301,20 +316,6 @@ class OAIPMHHarvester(HarvesterBase):
             self._save_object_error('Unable to get content for package: {u}: {e}'.format(
                 u=harvest_object.source.url, e=e), harvest_object)
             return False
-
-        if status == 'deleted':
-            # Delete package
-            context.update({'ignore_auth': True})
-            try:
-                logic.get_action('package_show')(context, {'id': harvest_object.package_id})
-                p.toolkit.get_action('package_delete')(context, {'id': harvest_object.package_id})
-                log.info('Deleted package {0} with guid {1}'.format(harvest_object.package_id, harvest_object.guid))
-            except p.toolkit.ObjectNotFound:
-                log.info('Data with guid {0} was marked as deleted but was not found in local database'.format(
-                    harvest_object.guid))
-                pass
-
-            return True
 
         if harvest_object.content is None:
             self._save_object_error('Empty content for object {0}'.format(harvest_object.id), harvest_object, 'Import')
@@ -349,18 +350,16 @@ class OAIPMHHarvester(HarvesterBase):
             package_dict['id'] = unicode(uuid.uuid4())
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
-                if not package_id:
-                    return False
-
-                # Save reference to the package on the object
-                harvest_object.package_id = package_id
-                harvest_object.add()
-                # Defer constraints and flush so the dataset can be indexed with
-                # the harvest object id (on the after_show hook from the harvester
-                # plugin)
-                model.Session.execute('SET CONSTRAINTS harvest_object_package_id_fkey DEFERRED')
-                model.Session.flush()
-                log.info('Created new package %s with guid %s', package_id, harvest_object.guid)
+                if package_id:
+                    # Save reference to the package on the object
+                    harvest_object.package_id = package_id
+                    harvest_object.add()
+                    # Defer constraints and flush so the dataset can be indexed with
+                    # the harvest object id (on the after_show hook from the harvester
+                    # plugin)
+                    model.Session.execute('SET CONSTRAINTS harvest_object_package_id_fkey DEFERRED')
+                    model.Session.flush()
+                    log.info('Created new package %s with guid %s', package_id, harvest_object.guid)
             except p.toolkit.ValidationError, e:
                 self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
                 return False
@@ -369,7 +368,6 @@ class OAIPMHHarvester(HarvesterBase):
 
             # Check if the modified date is more recent
             if previous_object and harvest_object.metadata_modified_date <= previous_object.metadata_modified_date:
-
                 # Assign the previous job id to the new object to
                 # avoid losing history
                 harvest_object.harvest_job_id = previous_object.job.id
