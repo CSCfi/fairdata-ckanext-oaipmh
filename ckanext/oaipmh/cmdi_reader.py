@@ -1,7 +1,8 @@
+from ckan import plugins as p
 import oaipmh.common
 from pylons import config
 from ckanext.oaipmh.importcore import generic_xml_metadata_reader
-from ckanext.etsin.mappers.cmdi import cmdi_mapper
+from ckanext.oaipmh.interfaces import IOAIPMHHarvester
 
 
 class CmdiReader(object):
@@ -30,6 +31,11 @@ class CmdiReader(object):
         :param xml: xml element (lxml)
         :return: oaipmh.common.Metadata object generated from xml
         """
+        from ckanext.oaipmh.cmdi import CMDIHarvester
+
+        for harvester in p.PluginImplementations(IOAIPMHHarvester):
+            package_dict = harvester.get_oaipmh_package_dict(CMDIHarvester.md_format, xml)
+
         result = generic_xml_metadata_reader(xml).getMap()
-        result['package_dict'] = cmdi_mapper(xml)
+        result['package_dict'] = package_dict
         return oaipmh.common.Metadata(xml, result)

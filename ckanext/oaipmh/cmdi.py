@@ -1,5 +1,6 @@
 from ckanext.oaipmh.harvester import OAIPMHHarvester
 
+
 class CMDIHarvester(OAIPMHHarvester):
     md_format = 'cmdi0571'
 

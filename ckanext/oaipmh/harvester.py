@@ -6,7 +6,7 @@ import oaipmh.error
 
 import importformats
 
-from ckan.model import Session, Package
+from ckan.model import Session
 from ckan import model
 from ckan import plugins as p
 from ckanext.harvest.model import HarvestJob, HarvestObject, HarvestObjectExtra as HOExtra
@@ -15,7 +15,6 @@ from ckanext.harvest.harvesters.base import HarvesterBase
 import fnmatch
 import re
 import uuid
-import dateutil
 
 log = logging.getLogger(__name__)
 
