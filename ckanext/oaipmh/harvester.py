@@ -41,42 +41,17 @@ class OAIPMHHarvester(HarvesterBase):
         harvest_type = config.get('type', 'default')
         return importformats.create_metadata_registry(harvest_type, harvest_job.source.url)
 
-    def validate_config(self, config):
-        '''
-        Harvesters can provide this method to validate the configuration entered in the
-        form. It should return a single string, which will be stored in the database.
-        Exceptions raised will be shown in the form's error messages.
-
-        :param harvest_object_id: Config string coming from the form
-        :returns: A string with the validated configuration options
-        '''
-
-        # TODO: Tests
-
-        def validate_param(d, p, t):
-            '''
-            Check if 'p' is specified and is of type 't'
-            '''
-            if p in d and not isinstance(d[p], t):
-                raise TypeError("'{p}' needs to be a '{t}'".format(t=t, p=p))
-            return p in d
-
-        # Todo: Write better try/except cases
-        if config:
-            dj = json.loads(config)
-            validate_param(dj, 'set', list)
-            validate_param(dj, 'type', basestring)
-            validate_param(dj, 'data_catalog_id', basestring)
-        else:
-            config = '{}'
-        return config
-
     def get_record_identifiers(self, set_ids, config, client):
         ''' Get package identifiers from given set identifiers.
         '''
 
-        kwargs = dict(config.items())
-        kwargs.pop('data_catalog_id')
+        kwargs = config
+
+        if 'data_catalog_id' in kwargs:
+            kwargs.pop('data_catalog_id')
+        if 'harvest_source_name' in kwargs:
+            kwargs.pop('harvest_source_name')
+
         kwargs['metadataPrefix'] = self.md_format
         if set_ids:
             for set_id in set_ids:
@@ -340,10 +315,15 @@ class OAIPMHHarvester(HarvesterBase):
         context.update({'xml': metadata.element()})
         context.update({'return_id_only': True})
 
-        # Set data catalog id to package_dict, if it exists in
+        # Set data catalog id to context, if it exists in
         # harvest source configuration
         if config.get('data_catalog_id', False):
-            package_dict['data_catalog'] = config.get('data_catalog_id')
+            context['data_catalog_id'] = config.get('data_catalog_id')
+
+        # Set harvest_source_name to context, if it exists in
+        # harvest source configuration
+        if config.get('harvest_source_name', False):
+            context['harvest_source_name'] = config.get('harvest_source_name')
 
         if status == 'new':
             package_dict['id'] = unicode(uuid.uuid4())
