@@ -19,8 +19,3 @@ class DataCiteHarvester(OAIPMHHarvester):
             'title': 'OAI-PMH DataCite',
             'description': 'Harvests DataCite v.3.1 datasets'
         }
-
-
-    def get_schema(self):
-        from ckanext.kata.plugin import KataPlugin
-        return KataPlugin.create_package_schema_oai_datacite()
