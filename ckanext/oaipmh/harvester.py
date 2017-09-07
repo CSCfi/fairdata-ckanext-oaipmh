@@ -41,22 +41,18 @@ class OAIPMHHarvester(HarvesterBase):
         harvest_type = config.get('type', 'default')
         return importformats.create_metadata_registry(harvest_type, harvest_job.source.url)
 
-    def get_record_identifiers(self, set_ids, config, client):
+    def get_record_identifiers(self, set_ids, client):
         ''' Get package identifiers from given set identifiers.
         '''
 
-        kwargs = config
-
-        if 'data_catalog_id' in kwargs:
-            kwargs.pop('data_catalog_id')
-        if 'harvest_source_name' in kwargs:
-            kwargs.pop('harvest_source_name')
-
+        kwargs = {}
         kwargs['metadataPrefix'] = self.md_format
+
         if set_ids:
             for set_id in set_ids:
+                kwargs['set'] = set_id
                 try:
-                    for header in client.listIdentifiers(set=set_id, **kwargs):
+                    for header in client.listIdentifiers(**kwargs):
                         yield header.identifier()
                 except oaipmh.error.NoRecordsMatchError:
                     pass
@@ -67,7 +63,7 @@ class OAIPMHHarvester(HarvesterBase):
             except oaipmh.error.NoRecordsMatchError:
                 pass
 
-    def populate_harvest_job(self, harvest_job, set_ids, config, client):
+    def populate_harvest_job(self, harvest_job, set_ids, client):
         # Check if this source has been harvested before
         previous_job = Session.query(HarvestJob) \
             .filter(HarvestJob.source == harvest_job.source) \
@@ -77,7 +73,7 @@ class OAIPMHHarvester(HarvesterBase):
             .limit(1).first()
 
         # Collect record identifiers
-        record_identifiers = list(self.get_record_identifiers(set_ids, config, client))
+        record_identifiers = list(self.get_record_identifiers(set_ids, client))
         log.debug('Record identifiers: %s', record_identifiers)
 
         if previous_job:
@@ -189,7 +185,7 @@ class OAIPMHHarvester(HarvesterBase):
 
         if len(set_ids):
             log.debug('Sets in config: %s', set_ids)
-        return self.populate_harvest_job(harvest_job, set_ids, config, client)
+        return self.populate_harvest_job(harvest_job, set_ids, client)
 
     def fetch_stage(self, harvest_object):
         '''
