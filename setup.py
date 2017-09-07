@@ -23,7 +23,6 @@ setup(
     ],
     entry_points="""
         [ckan.plugins]
-        oaipmh_harvester=ckanext.oaipmh.harvester:OAIPMHHarvester
         cmdi_harvester=ckanext.oaipmh.cmdi:CMDIHarvester
         datacite_harvester=ckanext.oaipmh.datacite:DataCiteHarvester
         """,
