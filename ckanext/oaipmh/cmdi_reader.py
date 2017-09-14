@@ -33,9 +33,11 @@ class CmdiReader(object):
         """
         from ckanext.oaipmh.cmdi import CMDIHarvester
 
+        package_dict = {}
+
         for harvester in p.PluginImplementations(IOAIPMHHarvester):
             package_dict = harvester.get_oaipmh_package_dict(CMDIHarvester.md_format, xml)
 
-        result = generic_xml_metadata_reader(xml).getMap()
-        result['package_dict'] = package_dict
-        return oaipmh.common.Metadata(xml, result)
+        package_dict['source_data'] = generic_xml_metadata_reader(xml).getMap()
+
+        return oaipmh.common.Metadata(xml, package_dict)
