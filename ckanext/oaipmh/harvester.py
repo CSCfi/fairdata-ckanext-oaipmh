@@ -306,8 +306,7 @@ class OAIPMHHarvester(HarvesterBase):
         harvest_object.add()
 
         # Get mapped package_dict
-        content = json.loads(harvest_object.content)
-        package_dict = content.pop('package_dict')
+        package_dict = json.loads(harvest_object.content)
         context.update({'xml': metadata.element()})
         context.update({'return_id_only': True})
 
