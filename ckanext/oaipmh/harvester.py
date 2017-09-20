@@ -326,6 +326,8 @@ class OAIPMHHarvester(HarvesterBase):
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
                 if not package_id:
+                    self._save_object_error('Import: Could not create {id}.'.format(id=package_dict['id']),
+                        harvest_object)
                     return False
 
                 # Save reference to the package on the object
@@ -358,6 +360,8 @@ class OAIPMHHarvester(HarvesterBase):
                 try:
                     package_id = p.toolkit.get_action('package_update')(context, package_dict)
                     if not package_id:
+                        self._save_object_error('Import: Could not update {id}.'.format(id=harvest_object.package_id),
+                                                harvest_object)
                         return False
                     log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
                 except p.toolkit.ValidationError, e:
