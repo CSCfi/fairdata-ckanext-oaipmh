@@ -314,7 +314,7 @@ class OAIPMHHarvester(HarvesterBase):
         # Set data catalog id to context, if it exists in
         # harvest source configuration
         if config.get('data_catalog_id', False):
-            context['data_catalog_id'] = config.get('data_catalog_id')
+            context['data_catalog_id'] = int(config.get('data_catalog_id'))
 
         # Set harvest_source_name to context, if it exists in
         # harvest source configuration
@@ -326,7 +326,7 @@ class OAIPMHHarvester(HarvesterBase):
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
                 if not package_id:
-                    self._save_object_error('Import: Could not create {id}.'.format(id=package_dict['id']),
+                    self._save_object_error('Import: Could not create {0}.'.format(harvest_object.guid),
                         harvest_object)
                     return False
 
