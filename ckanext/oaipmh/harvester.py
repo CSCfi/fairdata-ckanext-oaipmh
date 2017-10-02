@@ -314,7 +314,7 @@ class OAIPMHHarvester(HarvesterBase):
         # Set data catalog id to context, if it exists in
         # harvest source configuration
         if config.get('data_catalog_id', False):
-            context['data_catalog_id'] = int(config.get('data_catalog_id'))
+            context['data_catalog_id'] = config.get('data_catalog_id')
 
         # Set harvest_source_name to context, if it exists in
         # harvest source configuration
