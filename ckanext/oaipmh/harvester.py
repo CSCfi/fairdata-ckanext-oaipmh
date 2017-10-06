@@ -88,6 +88,7 @@ class OAIPMHHarvester(HarvesterBase):
 
                 query = model.Session.query(HarvestObject.guid, HarvestObject.package_id). \
                     filter(HarvestObject.current == True). \
+                    filter(HarvestObject.state != 'ERROR'). \
                     filter(HarvestObject.harvest_source_id == harvest_job.source.id)
 
                 db_guid_to_package_id = {}
@@ -328,6 +329,8 @@ class OAIPMHHarvester(HarvesterBase):
                 if not package_id:
                     self._save_object_error('Import: Could not create {0}.'.format(harvest_object.guid),
                         harvest_object)
+                    # Delete the previous object to avoid cluttering the object table
+                    previous_object.delete()
                     return False
 
                 # Save reference to the package on the object
