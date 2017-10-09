@@ -41,7 +41,5 @@ class DataCiteReader(object):
         for harvester in p.PluginImplementations(IOAIPMHHarvester):
             package_dict = harvester.get_oaipmh_package_dict(DataCiteHarvester.md_format, xml)
 
-        package_dict['source_data'] = generic_xml_metadata_reader(xml).getMap()
-
         return oaipmh.common.Metadata(xml, package_dict)
 

@@ -88,6 +88,7 @@ class OAIPMHHarvester(HarvesterBase):
 
                 query = model.Session.query(HarvestObject.guid, HarvestObject.package_id). \
                     filter(HarvestObject.current == True). \
+                    filter(HarvestObject.state != 'ERROR'). \
                     filter(HarvestObject.harvest_source_id == harvest_job.source.id)
 
                 db_guid_to_package_id = {}
@@ -308,8 +309,7 @@ class OAIPMHHarvester(HarvesterBase):
         # Get mapped package_dict and move source data to context
         package_dict = json.loads(harvest_object.content)
         context.update({
-            'source_data': package_dict.pop('source_data'),
-            'xml': metadata.element(),
+            'source_data': metadata.element(),
             'return_id_only': True
         })
 
@@ -328,6 +328,10 @@ class OAIPMHHarvester(HarvesterBase):
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
                 if not package_id:
+                    self._save_object_error('Import: Could not create {0}.'.format(harvest_object.guid),
+                        harvest_object)
+                    # Delete the previous object to avoid cluttering the object table
+                    previous_object.delete()
                     return False
 
                 # Save reference to the package on the object
@@ -360,6 +364,8 @@ class OAIPMHHarvester(HarvesterBase):
                 try:
                     package_id = p.toolkit.get_action('package_update')(context, package_dict)
                     if not package_id:
+                        self._save_object_error('Import: Could not update {id}.'.format(id=harvest_object.package_id),
+                                                harvest_object)
                         return False
                     log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
                 except p.toolkit.ValidationError, e:
