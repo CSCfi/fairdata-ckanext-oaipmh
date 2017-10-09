@@ -305,10 +305,13 @@ class OAIPMHHarvester(HarvesterBase):
         harvest_object.current = True
         harvest_object.add()
 
-        # Get mapped package_dict
+        # Get mapped package_dict and move source data to context
         package_dict = json.loads(harvest_object.content)
-        context.update({'xml': metadata.element()})
-        context.update({'return_id_only': True})
+        context.update({
+            'source_data': package_dict.pop('source_data'),
+            'xml': metadata.element(),
+            'return_id_only': True
+        })
 
         # Set data catalog id to context, if it exists in
         # harvest source configuration
