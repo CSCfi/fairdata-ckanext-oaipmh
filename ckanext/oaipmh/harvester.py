@@ -309,8 +309,7 @@ class OAIPMHHarvester(HarvesterBase):
         # Get mapped package_dict and move source data to context
         package_dict = json.loads(harvest_object.content)
         context.update({
-            'source_data': package_dict.pop('source_data'),
-            'xml': metadata.element(),
+            'source_data': metadata.element(),
             'return_id_only': True
         })
 
