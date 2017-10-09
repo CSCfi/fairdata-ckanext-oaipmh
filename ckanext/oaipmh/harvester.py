@@ -12,6 +12,8 @@ from ckan import plugins as p
 from ckanext.harvest.model import HarvestJob, HarvestObject, HarvestObjectExtra as HOExtra
 from ckanext.harvest.harvesters.base import HarvesterBase
 
+from ckanext.etsin.data_catalog_service import ensure_data_catalog_ok
+
 import fnmatch
 import re
 import uuid
@@ -159,6 +161,10 @@ class OAIPMHHarvester(HarvesterBase):
         log.debug('Harvest source: %s', harvest_job.source.url)
 
         config = self._get_configuration(harvest_job)
+
+        # Data catalog related operations
+        if not ensure_data_catalog_ok(config.get('harvest_source_name', '')):
+            return []
 
         # Create a OAI-PMH Client
         registry = self.metadata_registry(config, harvest_job)
@@ -312,11 +318,6 @@ class OAIPMHHarvester(HarvesterBase):
             'source_data': metadata.element(),
             'return_id_only': True
         })
-
-        # Set data catalog id to context, if it exists in
-        # harvest source configuration
-        if config.get('data_catalog_id', False):
-            context['data_catalog_id'] = config.get('data_catalog_id')
 
         # Set harvest_source_name to context, if it exists in
         # harvest source configuration
