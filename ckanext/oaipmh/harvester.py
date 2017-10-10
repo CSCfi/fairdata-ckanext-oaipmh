@@ -351,29 +351,39 @@ class OAIPMHHarvester(HarvesterBase):
 
         elif status == 'change':
 
-            # Check if the modified date is more recent
-            if previous_object and harvest_object.metadata_modified_date <= previous_object.metadata_modified_date:
-                # Assign the previous job id to the new object to
-                # avoid losing history
-                harvest_object.harvest_job_id = previous_object.job.id
-                harvest_object.add()
+            # Set force_harvest_update from config if it exists, default to false
+            force_harvest_update = config.get('force_harvest_update', False)
 
-                # Delete the previous object to avoid cluttering the object table
-                if previous_object:
-                    previous_object.delete()
-                log.info('Document with GUID %s unchanged, skipping...' % (harvest_object.guid))
-            else:
-                package_dict['id'] = harvest_object.package_id
-                try:
-                    package_id = p.toolkit.get_action('package_update')(context, package_dict)
-                    if not package_id:
-                        self._save_object_error('Import: Could not update {id}.'.format(id=harvest_object.package_id),
-                                                harvest_object)
+            if previous_object:
+                # Check if the modified date is more recent
+                is_modified_after_previous = harvest_object.metadata_modified_date > previous_object.metadata_modified_date
+
+                if is_modified_after_previous or force_harvest_update:
+                    package_dict['id'] = harvest_object.package_id
+                    try:
+                        package_id = p.toolkit.get_action('package_update')(context, package_dict)
+                        if not package_id:
+                            self._save_object_error(
+                                'Import: Could not update {id}.'.format(id=harvest_object.package_id),
+                                harvest_object)
+                            return False
+                        log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
+                    except p.toolkit.ValidationError, e:
+                        self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
                         return False
-                    log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
-                except p.toolkit.ValidationError, e:
-                    self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
-                    return False
+                else:
+                    # Assign the previous job id to the new object to
+                    # avoid losing history
+                    harvest_object.harvest_job_id = previous_object.job.id
+                    harvest_object.add()
+
+                    # Delete the previous object to avoid cluttering the object table
+                    if previous_object:
+                        previous_object.delete()
+                    log.info('Document with GUID %s unchanged, skipping...' % harvest_object.guid)
+            else:
+                log.error("Previous harvest object does not exist even though update operation had been assumed. "
+                          "Skipping this one..")
 
         model.Session.commit()
         return True
