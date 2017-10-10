@@ -332,7 +332,8 @@ class OAIPMHHarvester(HarvesterBase):
                     self._save_object_error('Import: Could not create {0}.'.format(harvest_object.guid),
                         harvest_object)
                     # Delete the previous object to avoid cluttering the object table
-                    previous_object.delete()
+                    if previous_object:
+                        previous_object.delete()
                     return False
 
                 # Save reference to the package on the object
@@ -358,7 +359,8 @@ class OAIPMHHarvester(HarvesterBase):
                 harvest_object.add()
 
                 # Delete the previous object to avoid cluttering the object table
-                previous_object.delete()
+                if previous_object:
+                    previous_object.delete()
                 log.info('Document with GUID %s unchanged, skipping...' % (harvest_object.guid))
             else:
                 package_dict['id'] = harvest_object.package_id
