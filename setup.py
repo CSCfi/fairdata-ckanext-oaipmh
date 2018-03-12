@@ -25,6 +25,6 @@ setup(
         [ckan.plugins]
         cmdi_harvester=ckanext.oaipmh.cmdi:CMDIHarvester
         datacite_harvester=ckanext.oaipmh.datacite:DataCiteHarvester
-        ddi_harvester=ckanext.oaipmh.ddi25:Ddi25Harvester
+        ddi25_harvester=ckanext.oaipmh.ddi25:Ddi25Harvester
         """,
 )
