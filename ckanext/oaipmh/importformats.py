@@ -173,7 +173,7 @@ def create_metadata_registry(harvest_type=None, service_url=None):
     # registry.registerReader('oai_dc', dc_metadata_reader(harvest_type or 'default'))
     registry.registerReader('cmdi0571', CmdiReader(service_url))
     registry.registerReader('oai_datacite', DataCiteReader())
-    registry.registerReader('oai_ddi25', Ddi25Reader())
+    registry.registerReader('ddi_c', Ddi25Reader())
     registry.registerReader('nrd', nrd_metadata_reader)
     registry.registerReader('rdf', rdf_reader)
     registry.registerReader('xml', xml_reader)
