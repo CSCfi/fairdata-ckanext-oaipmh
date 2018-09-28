@@ -368,7 +368,7 @@ class OAIPMHHarvester(HarvesterBase):
                 # Check if the modified date is more recent
                 is_modified_after_previous = harvest_object.metadata_modified_date > previous_object.metadata_modified_date
 
-                if is_modified_after_previous or force_harvest_update:
+                if force_harvest_update or is_modified_after_previous:
                     package_dict['id'] = harvest_object.package_id
                     try:
                         package_id = p.toolkit.get_action('package_update')(context, package_dict)
@@ -388,8 +388,7 @@ class OAIPMHHarvester(HarvesterBase):
                     harvest_object.add()
 
                     # Delete the previous object to avoid cluttering the object table
-                    if previous_object:
-                        previous_object.delete()
+                    previous_object.delete()
                     log.info('Document with GUID %s unchanged, skipping...' % harvest_object.guid)
             else:
                 log.error("Previous harvest object does not exist even though update operation had been assumed. "
