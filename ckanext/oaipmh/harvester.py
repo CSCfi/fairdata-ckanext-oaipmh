@@ -23,7 +23,6 @@ from ckanext.etsin.data_catalog_service import ensure_data_catalog_ok
 
 import fnmatch
 import re
-import uuid
 
 log = logging.getLogger(__name__)
 
@@ -107,18 +106,24 @@ class OAIPMHHarvester(HarvesterBase):
                 guids_in_db = set(db_guid_to_package_id.keys())
                 guids_in_harvest = set(record_identifiers)
 
-                new = guids_in_harvest - guids_in_db
-                change = guids_in_db & guids_in_harvest
+                new_hos = guids_in_harvest - guids_in_db
+                existing_hos = guids_in_db & guids_in_harvest
 
-                for guid in new:
+                for guid in new_hos:
                     obj = HarvestObject(guid=guid, job=harvest_job,
                                         extras=[HOExtra(key='status', value='new')])
                     obj.save()
                     object_ids.append(obj.id)
-                for guid in change:
-                    obj = HarvestObject(guid=guid, job=harvest_job,
-                                        package_id=db_guid_to_package_id[guid],
-                                        extras=[HOExtra(key='status', value='change')])
+                for guid in existing_hos:
+                    package_id = db_guid_to_package_id[guid]
+                    if package_id:
+                        obj = HarvestObject(guid=guid, job=harvest_job,
+                                            package_id=package_id,
+                                            extras=[HOExtra(key='status', value='change')])
+                    else:
+                        obj = HarvestObject(guid=guid, job=harvest_job,
+                                            extras=[HOExtra(key='status', value='new')])
+
                     obj.save()
                     object_ids.append(obj.id)
                 # Deleted datasets are handled later using object_ids as the list of
@@ -263,7 +268,7 @@ class OAIPMHHarvester(HarvesterBase):
 
         if header and header.datestamp():
             harvest_object.metadata_modified_date = header.datestamp()
-            harvest_object.save()
+            harvest_object.add()
 
         if header and header.isDeleted():
             harvest_object.content = None
@@ -293,7 +298,7 @@ class OAIPMHHarvester(HarvesterBase):
             content = json.dumps(metadata.getMap())
             # Save the fetched contents in the HarvestObject
             harvest_object.content = content
-            harvest_object.save()
+            harvest_object.add()
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -332,7 +337,6 @@ class OAIPMHHarvester(HarvesterBase):
             context['harvest_source_name'] = config.get('harvest_source_name')
 
         if status == 'new':
-            package_dict['id'] = unicode(uuid.uuid4())
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
                 if not package_id:
@@ -357,7 +361,6 @@ class OAIPMHHarvester(HarvesterBase):
                 return False
 
         elif status == 'change':
-
             # Set force_harvest_update from config if it exists, default to false
             force_harvest_update = config.get('force_harvest_update', False)
 
