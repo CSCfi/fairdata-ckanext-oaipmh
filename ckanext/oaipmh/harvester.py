@@ -72,69 +72,49 @@ class OAIPMHHarvester(HarvesterBase):
                 pass
 
     def populate_harvest_job(self, harvest_job, set_ids, client):
-        # Check if this source has been harvested before
-        previous_job = Session.query(HarvestJob) \
-            .filter(HarvestJob.source == harvest_job.source) \
-            .filter(HarvestJob.gather_finished != None) \
-            .filter(HarvestJob.id != harvest_job.id) \
-            .order_by(HarvestJob.gather_finished.desc()) \
-            .limit(1).first()
-
+        url = harvest_job.source.url
+        if len(set_ids):
+            log.debug('Sets in config: %s', set_ids)
         # Collect record identifiers
-        record_identifiers = list(self.get_record_identifiers(set_ids, client))
-        log.debug('Record identifiers: %s', record_identifiers)
-
-        if previous_job:
-            for previous_error in [error.guid for error in Session.query(HarvestObject).
-                                   filter(HarvestObject.harvest_job_id == previous_job.id).
-                                   filter(HarvestObject.state == 'ERROR').all()]:
-                if previous_error not in record_identifiers:
-                    record_identifiers.append(previous_error)
+        guids_in_source = set(self.get_record_identifiers(set_ids, client))
         try:
             object_ids = []
-            if len(record_identifiers):
+            if len(guids_in_source):
+                log.debug('Record identifiers: %s', guids_in_source)
 
-                query = model.Session.query(HarvestObject.guid, HarvestObject.package_id). \
+                harvest_objs_in_db = model.Session.query(HarvestObject.guid, HarvestObject.package_id). \
                     filter(HarvestObject.current == True). \
-                    filter(HarvestObject.state != 'ERROR'). \
                     filter(HarvestObject.harvest_source_id == harvest_job.source.id)
 
-                db_guid_to_package_id = {}
-                for ho_in_db_guid, ho_in_db_package_id in query:
-                    db_guid_to_package_id[ho_in_db_guid] = ho_in_db_package_id
+                db_harvest_obj_guid_to_package_id_map = {}
+                for guid, package_id in harvest_objs_in_db:
+                    db_harvest_obj_guid_to_package_id_map[guid] = package_id
 
-                guids_in_db = set(db_guid_to_package_id.keys())
-                guids_in_harvest = set(record_identifiers)
+                current_guids_in_db = set(db_harvest_obj_guid_to_package_id_map.keys())
 
-                new_hos = guids_in_harvest - guids_in_db
-                existing_hos = guids_in_db & guids_in_harvest
+                new_guids = guids_in_source - current_guids_in_db
+                existing_guids = current_guids_in_db & guids_in_source
 
-                for guid in new_hos:
+                for guid in new_guids:
                     obj = HarvestObject(guid=guid, job=harvest_job,
                                         extras=[HOExtra(key='status', value='new')])
                     obj.save()
                     object_ids.append(obj.id)
-                for guid in existing_hos:
-                    package_id = db_guid_to_package_id[guid]
-                    if package_id:
-                        obj = HarvestObject(guid=guid, job=harvest_job,
-                                            package_id=package_id,
-                                            extras=[HOExtra(key='status', value='change')])
-                    else:
-                        obj = HarvestObject(guid=guid, job=harvest_job,
-                                            extras=[HOExtra(key='status', value='new')])
-
+                for guid in existing_guids:
+                    obj = HarvestObject(guid=guid, job=harvest_job,
+                                        package_id=db_harvest_obj_guid_to_package_id_map[guid],
+                                        extras=[HOExtra(key='status', value='change')])
                     obj.save()
                     object_ids.append(obj.id)
                 # Deleted datasets are handled later using object_ids as the list of
                 # identifiers for getting identifiers that are inspected whether they
                 # are deleted.
 
-                log.debug('Object ids: {i}'.format(i=object_ids))
+                log.debug('Harvest object IDs: {i}'.format(i=object_ids))
                 return object_ids
             else:
-                self._save_gather_error('No packages received for URL: {u}'.format(
-                    u=harvest_job.source.url), harvest_job)
+                self._save_gather_error('No records received from URL: {u}'.format(
+                    u=url), harvest_job)
                 return None
         except Exception as e:
             self._save_gather_error('Gather: {e}'.format(e=e), harvest_job)
@@ -169,8 +149,8 @@ class OAIPMHHarvester(HarvesterBase):
         :returns: A list of HarvestObject ids
         :type harvest_job: HarvestJob
         '''
-        log.debug('Starting gather stage')
-        log.debug('Harvest source: %s', harvest_job.source.url)
+        log.info('OAI-PMH Harvester gather_stage for job: %r', harvest_job)
+        log.info('Harvest source: %s', harvest_job.source.url)
 
         config = self._get_configuration(harvest_job)
 
@@ -202,8 +182,6 @@ class OAIPMHHarvester(HarvesterBase):
                     log.warning("Given set %s is not in available sets. Not removing.", set_id)
                 set_ids.add(set_id)
 
-        if len(set_ids):
-            log.debug('Sets in config: %s', set_ids)
         return self.populate_harvest_job(harvest_job, set_ids, client)
 
     def fetch_stage(self, harvest_object):
@@ -283,15 +261,16 @@ class OAIPMHHarvester(HarvesterBase):
                     p.toolkit.get_action('package_delete')(context, {'id': harvest_object.package_id})
                     log.info('Deleted package with id {0}'.format(harvest_object.package_id))
                 else:
-                    log.info('Data with identifier {0} was marked deleted in the API but harvest object does not have a package id, which indicates it is not found in local database either'.format(
-                        harvest_object.guid))
+                    log.info(
+                        'Data with identifier {0} was marked deleted in the API but harvest object does not have a package id, which indicates it is not found in local database either'.format(
+                            harvest_object.guid))
             except p.toolkit.ObjectNotFound:
-                log.debug("Tried to delete package with id {0}, but could not find it".format(harvest_object.package_id))
+                log.debug(
+                    "Tried to delete package with id {0}, but could not find it".format(harvest_object.package_id))
                 pass
 
-            #Stop processing when some identifier is marked as deleted
+            # Stop processing when some identifier is marked as deleted
             return True
-
 
         # Get contents
         try:
@@ -315,15 +294,6 @@ class OAIPMHHarvester(HarvesterBase):
             .filter(HarvestObject.current == True) \
             .first()
 
-        # Flag previous object as not current anymore
-        if previous_object:
-            previous_object.current = False
-            previous_object.add()
-
-        # Flag this object as the current one
-        harvest_object.current = True
-        harvest_object.add()
-
         # Get mapped package_dict and move source data to context
         package_dict = json.loads(harvest_object.content)
         context.update({
@@ -340,22 +310,36 @@ class OAIPMHHarvester(HarvesterBase):
             try:
                 package_id = p.toolkit.get_action('package_create')(context, package_dict)
                 if not package_id:
-                    self._save_object_error('Import: Could not create {0}.'.format(harvest_object.guid),
-                        harvest_object)
+                    self._save_object_error('Import: Could not create record for guid {0}.'.format(harvest_object.guid),
+                                            harvest_object)
                     # Delete the previous object to avoid cluttering the object table
                     if previous_object:
                         previous_object.delete()
+                        model.Session.commit()
                     return False
+
+                # Flag previous object as not current anymore
+                if previous_object:
+                    previous_object.current = False
+                    previous_object.add()
+
+                # Flag this object as the current one
+                harvest_object.current = True
+                harvest_object.add()
 
                 # Save reference to the package on the object
                 harvest_object.package_id = package_id
                 harvest_object.add()
+
                 # Defer constraints and flush so the dataset can be indexed with
                 # the harvest object id (on the after_show hook from the harvester
                 # plugin)
                 model.Session.execute('SET CONSTRAINTS harvest_object_package_id_fkey DEFERRED')
                 model.Session.flush()
-                log.info('Created new package %s with guid %s', package_id, harvest_object.guid)
+
+                log.info('Created new record having package_id %s for guid %s', package_id, harvest_object.guid)
+                model.Session.commit()
+                return True
             except p.toolkit.ValidationError, e:
                 self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
                 return False
@@ -374,10 +358,22 @@ class OAIPMHHarvester(HarvesterBase):
                         package_id = p.toolkit.get_action('package_update')(context, package_dict)
                         if not package_id:
                             self._save_object_error(
-                                'Import: Could not update {id}.'.format(id=harvest_object.package_id),
+                                'Could not update record having package_id {0} for guid {1}.'.format(
+                                    harvest_object.package_id, harvest_object.guid),
                                 harvest_object)
                             return False
-                        log.info('Updated package %s with guid %s', package_id, harvest_object.guid)
+
+                        # Flag previous object as not current anymore
+                        previous_object.current = False
+                        previous_object.add()
+
+                        # Flag this object as the current one
+                        harvest_object.current = True
+                        harvest_object.add()
+
+                        log.info('Updated record having package_id %s for guid %s', package_id, harvest_object.guid)
+                        model.Session.commit()
+                        return True
                     except p.toolkit.ValidationError, e:
                         self._save_object_error('Validation Error: %s' % str(e.error_summary), harvest_object, 'Import')
                         return False
@@ -387,12 +383,23 @@ class OAIPMHHarvester(HarvesterBase):
                     harvest_object.harvest_job_id = previous_object.job.id
                     harvest_object.add()
 
+                    # Flag previous object as not current anymore
+                    previous_object.current = False
+                    previous_object.add()
+
+                    # Flag this object as the current one
+                    harvest_object.current = True
+                    harvest_object.add()
+
                     # Delete the previous object to avoid cluttering the object table
                     previous_object.delete()
                     log.info('Document with GUID %s unchanged, skipping...' % harvest_object.guid)
+                    model.Session.commit()
+                    return True
             else:
-                log.error("Previous harvest object does not exist even though update operation had been assumed. "
-                          "Skipping this one..")
+                self._save_object_error(
+                    "Previous harvest object does not exist even though update operation had been assumed.",
+                    harvest_object, 'Import')
+                return False
 
-        model.Session.commit()
-        return True
+        return False
