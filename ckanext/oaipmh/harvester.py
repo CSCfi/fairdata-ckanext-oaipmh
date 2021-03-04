@@ -160,7 +160,7 @@ class OAIPMHHarvester(HarvesterBase):
 
         # Create a OAI-PMH Client
         registry = self.metadata_registry(config, harvest_job)
-        client = oaipmh.client.Client(harvest_job.source.url, registry)
+        client = oaipmh.client.Client(harvest_job.source.url, registry, force_http_get=True)
 
         available_sets = list(client.listSets())
 
@@ -234,7 +234,7 @@ class OAIPMHHarvester(HarvesterBase):
         try:
             # Create a OAI-PMH Client and get record
             registry = self.metadata_registry(config, harvest_object)
-            client = oaipmh.client.Client(harvest_object.job.source.url, registry)
+            client = oaipmh.client.Client(harvest_object.job.source.url, registry, force_http_get=True)
             header, metadata, _about = client.getRecord(identifier=harvest_object.guid,
                                                         metadataPrefix=self.md_format)
         except Exception as e:
